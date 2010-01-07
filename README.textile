@@ -1,0 +1,25 @@
+h2. Jython API for VMWare ESX Server
+
+This is a simple "Jython":http://www.jython.org/ API for interacting with VMWare machines running on VMWare ESX Server. The library is built around the "VI Java API":http://vijava.sourceforge.net/ .
+
+h3. Requirements:
+
+ * JDK 1.6
+ * Jython 2.5.1 or greater
+
+h3. Setup
+
+ * Install Jython
+ * Make both jars in the 'deps' directory available to the Java classpath
+
+Example use from a Jython shell: 
+<pre>
+<code>
+ >> import esx
+ >> session = esx.login('https://yourserver/sdk','username','password')
+ >> session,results = esx.listAllRegisteredVMS(session)
+ >> for i in results: print i 
+</code>
+</pre>
+
+NOTE: Not for production use.  We still have some work to do!
