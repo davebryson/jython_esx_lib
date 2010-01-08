@@ -459,14 +459,24 @@ def __findSnapshotInTree(snapTree, snapshot_name):
 
 def fullCopyVM(session,src_name,dst_name):
     """
-    Still testing, more to come...
+    Make a *complete* copy of the VM and it's associated files.
+
+    session:  the session object
+    src_name: the name of the VM to copy
+    dst_name: the new directory name to copy the VM to
+    
+    returns: The fullpath to the copied VMX file
     """
     # Regular expression used for converting the adapter type
     adapterPattern = re.compile(r"([A-Za-z]{3})(.*)")
     
     rootFolder = session.getRootFolder()
-    data_center = InventoryNavigator(rootFolder).searchManagedEntity("Datacenter", "ha-datacenter")
+    data_center = InventoryNavigator(rootFolder).searchManagedEntity("Datacenter","ha-datacenter")
+    print "Datacenter: %r" % data_center
+
     fileMgr = session.getFileManager()
+    print "FileMgr: %r" % fileMgr
+
     vdiskMgr = session.getVirtualDiskManager()
     
     if not fileMgr:
@@ -486,7 +496,7 @@ def fullCopyVM(session,src_name,dst_name):
     basePath = "["+datastore_name+"] " + dst_name
     print "BasePath %s" % basePath
 
-    fileMgr.makeDirectory(basePath,data_center,True)
+    fileMgr.makeDirectory(basePath,data_center,False)
 
     # Loop over all devices attached to the src VM
     for dev in vm.getConfig().getHardware().getDevice():
@@ -530,7 +540,7 @@ def fullCopyVM(session,src_name,dst_name):
             diskSpec.setAdapterType(adapterType)
 
             # Finally lets copy the virtual disk
-            task = vdiskMgr.copyVirtualDisk_Task(src_vmdk,data_center,dst_vmdk,data_center,diskSpec,true)
+            task = vdiskMgr.copyVirtualDisk_Task(source_vmdk,data_center,dest_vmdk,data_center,diskSpec,True)
             if not task.waitForMe() == Task.SUCCESS:
                 print "Error copying the virtualdisk to destination"
                 return (session,"undef")
@@ -542,15 +552,26 @@ def fullCopyVM(session,src_name,dst_name):
     dest_nvram = None
     source_vmss = None
     dest_vmss = None
+
+    # NOTE (TODO): For some reason, the nvram key is set to the "vmname.nvram" EVEN
+    # if the nvram file DOES NOT exist! So we need to gracefully handle the error
+    # and continue on 
     for entry in vm.getConfig().getExtraConfig():
         # Note: getValue() is an Object
+        print "Entry: K: %s  V: %s" % (entry.getKey(),str(entry.getValue()))
         k = entry.getKey()
         v = str(entry.getValue())
         if k == "nvram" and v != "":
             source_nvram = os.path.dirname(vm.getConfig().getFiles().getVmPathName()) + "/" + v
+
+            print "Source nvram: %s" % source_nvram
+
             dest_nvram = basePath + "/" + v
         if k == "checkpoint.vmState" and v != "":
             source_vmss = vm.getConfig().getFiles().getSuspendDirectory() + "/" +  v
+
+            print "Source vmss: %s" % source_vmss
+            
             dest_vmss = basePath +  "/" +  v
         if source_nvram and dest_nvram and source_vmss and dest_vmss:
             break
