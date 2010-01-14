@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<honeyclient>
+  <organization description="this is a desc">
+    MITRE
+  </organization>
+  <time_zone description="desc">
+    UTC
+  </time_zone>
+ <manager>
+   <virtualization_mode description="This value dictates that VMware ESX Server (HoneyClient::Manager::ESX) is used as the primary virtualization mode." default="HoneyClient::Manager::ESX">
+            HoneyClient::Manager::ESX
+   </virtualization_mode>
+   <address description="The IP or hostname that all Manager modules should use, when accepting SOAP requests." default="localhost">
+            localhost
+   </address>
+   <esx>
+     <session_timeout description="A" default="900">
+                900
+     </session_timeout>
+     <timeout description="B" default="7200">
+       7200
+     </timeout>
+     <test>
+       <service_url description="URL of the VMware ESX Server." default="https://127.0.0.1/sdk">
+         https://127.0.0.1/sdk
+       </service_url>
+       <user_name description="The username used to login to the VIM service running on the ESX server." default="root">
+         root
+       </user_name>
+       <password description="The password used to login to the VIM service running on the ESX server.">
+         passw0rd
+       </password>
+       <test_vm_name>Ubuntu_Test_VM</test_vm_name>
+     </test>
+   </esx>
+ </manager>
+</honeyclient>
