@@ -1,4 +1,11 @@
 
 Next:
 
-- quickClone()
+- on QuickClone VM is failing because the VM is left in the suspended state and can't resume it...
+
+- esx.pm use 'croak' to exit the process on errors. Need to convert my code to exit as well INSTEAD
+  of just returning 'undef'
+
+- implement renameSnapshotVM
+
+- test all

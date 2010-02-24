@@ -18,8 +18,18 @@
                 900
      </session_timeout>
      <timeout description="B" default="7200">
-       7200
+       7201
      </timeout>
+     <default_quick_clone_master_annotation description="When performing a quick clone, we annotate the source VM in order to inform the user to NEVER alter the source VM ever again." default="">
+       Type: Master VM  WARNING: DO NOT ALTER THIS VM FURTHER OTHERWISE, ALL SUBSEQUENT CLONES WILL BE CORRUPTED
+     </default_quick_clone_master_annotation>
+     <default_quick_clone_snapshot_name description="When performing a quick clone, this value is the name of the initial snapshot that is created on the clone VM." default="Initial Snapshot - DO NOT ALTER OR RENAME THIS SNAPSHOT">
+Initial Snapshot - DO NOT RENAME THIS SNAPSHOT
+</default_quick_clone_snapshot_name>
+     <default_quick_clone_snapshot_description description="When performing a quick clone, this value is the description of the initial snapshot that is created on the clone VM." default="">
+State: Initialized - This snapshot marks the initial state of this clone VM, that is then used by all subsequent snapshots.  WARNING: If you alter delete this snapshot (or any dependent snapshots), then all dependent snapshots will become corrupted as well.
+     </default_quick_clone_snapshot_description>
+
      <test>
        <service_url description="URL of the VMware ESX Server." default="https://127.0.0.1/sdk">
          https://127.0.0.1/sdk
@@ -30,7 +40,7 @@
        <password description="The password used to login to the VIM service running on the ESX server.">
          passw0rd
        </password>
-       <test_vm_name>Ubuntu_Test_VM</test_vm_name>
+       <test_vm_name>Hive</test_vm_name>
      </test>
    </esx>
  </manager>

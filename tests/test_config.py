@@ -19,10 +19,5 @@ class TestConfig(unittest.TestCase):
         r = getArg('session_timeout','honeyclient::manager::esx')
         self.assertEqual(r,"900")
 
-    def testGetHash(self):
-         r = getArg('esx','honeyclient::manager')
-         self.assert_(r)
-         self.assertEqual(2,len(r))
-
 if __name__ == '__main__':
     unittest.main()

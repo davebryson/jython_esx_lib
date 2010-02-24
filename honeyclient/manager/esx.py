@@ -22,8 +22,9 @@ from java.net import URL
 import java.lang as lang
 from com.vmware.vim25 import *
 from com.vmware.vim25.mo import *
+from com.vmware.vim25.mo.util import *
 
-import os.path,re,uuid,sys
+import os.path,re,uuid,sys,time
 from honeyclient.util.config import *
 
 
@@ -40,8 +41,7 @@ def login(service_url,un,pw):
     try:
        return ServiceInstance(URL(service_url),un,pw,True)
     except:
-        LOG.error("Error logging into the ESX Server. Check login credentials. Exiting...")
-        sys.exit("Error logging into the ESX Server. Check login credentials. Exiting...")
+        croak("Error logging into the ESX Server. Check login credentials. Exiting...")
 
 def logout(session):
     """
@@ -85,8 +85,7 @@ def registerVM(session,path,name):
     if hostsystem_list and len(hostsystem_list) > 0:
         host = hostsystem_list[0]
     else:
-        LOG.error("Error. Can't find a hostsystem needed to register the VM")
-        return (session)
+        croak("Error. Can't find a hostsystem needed to register the VM")
 
     vm_folder = data_center.getVmFolder()
     host_folder = data_center.getHostFolder()
@@ -124,7 +123,6 @@ def getStateVM(session,name):
     return (session,state) or (session,"error") if vm not found
     """
     vm = getVMbyName(session,name)
-
     state = vm.getRuntime().getPowerState()
     return (session,str(state))
 
@@ -133,34 +131,64 @@ def startVM(session,name):
     Start a VM by name
     return (session, True|False)
     """
-    vm = getVMbyName(session,name)
+    s,state = getStateVM(session,name)
+    if state == 'poweredOn':
+        return (session,True)
+    
+    if state == 'suspended':
+        croak("Cannot start a suspended VM: %s" % name)
 
-    try:
-        task = vm.powerOnVM_Task(None)
-        if task.waitForMe() == Task.SUCCESS:
-            return (session,True)
-        else:
-            return (session,False)
-    except MethodFault, detail:
-        LOG.error("Error trying to start VM: %s. Reason: %s" % (name,detail.getMessage()))
-        return (session,False)
+    vm = getVMbyName(session,name)
+    task = vm.powerOnVM_Task(None)
+    # This doesn't actually wait long enough in most cases
+    flag = task.waitForMe()
+
+    if flag == Task.SUCCESS:
+        s,state1 = getStateVM(session,name)
+        
+        # My spin loop to wait for the thing to actually start
+        counter = 0
+        while state1 != 'poweredOn' and counter < 10:
+            time.sleep(1)
+            s,state1 = getStateVM(session,name)
+            counter += 1
+
+        return (session,True)
+    else:
+        croak("Could not start VM %s" % name)
 
 def stopVM(session,name):
     """
     Stop a VM by name
     return (session, True|False)
     """
+
+    s,state = getStateVM(session,name)
+    if state == 'poweredOff':
+        return (session,True)
+
+    # If the thing is suspended you need to start it
+    # first to stop it.
+    if state == 'suspended':
+        startVM(session,name)
+
     vm = getVMbyName(session,name)
 
-    try:
-        task = vm.powerOffVM_Task()
-        if task.waitForMe() == Task.SUCCESS:
-            return (session,True)
-        else:
-            return (session,False)
-    except MethodFault,detail:
-        LOG.error("Error stopping the VM: %s. Reason %s" % (name,detail.getMessage()))
-        return (session,False)
+    task = vm.powerOffVM_Task()
+    flag = task.waitForMe()
+    if flag == Task.SUCCESS:
+        s,state1 = getStateVM(session,name)
+        
+        # My spin loop to wait for the thing to actually stop
+        counter = 0
+        while state1 != 'poweredOff' and counter < 10:
+            time.sleep(1)
+            s,state1 = getStateVM(session,name)
+            counter += 1
+        return (session,True)
+    else:
+        croak("Could not stop the VM: %s" % name)
+        
 
 def rebootVM(session,name):
 
@@ -170,23 +198,33 @@ def rebootVM(session,name):
         vm.rebootGuest()
         return (session,True)
     except:
-        LOG.error("Reboot failed for VM: %s" % name)
-        return (session,False)
+        croak("Reboot failed for VM: %s!" % name)
 
 def suspendVM(session,name):
 
-    vm = getVMbyName(session,name)
+    s,state = getStateVM(session,name)
+    if state == 'suspended':
+        return (session,True)
 
-    try:
-        task = vm.suspendVM_Task()
-        if task.waitForMe() == Task.SUCCESS:
-            return (session,True)
-        else:
-            LOG.error("Failed to suspend VM: %s" % name)
-            return (session,False)
-    except: 
-        LOG.error("Failed to suspend VM: %s" % name)
-        return (session,False)
+    if state == 'poweredOff':
+        croak("Cannot suspend a poweredOff VM. VM name: %s" % name)
+
+    vm = getVMbyName(session,name)
+    
+    task = vm.suspendVM_Task()
+    flag = task.waitForMe()
+    if flag == Task.SUCCESS:
+        s,state1 = getStateVM(session,name)
+        
+        # My spin loop to wait for the thing to actually suspend
+        counter = 0
+        while state1 != 'suspended' and counter < 10:
+            time.sleep(1)
+            s,state1 = getStateVM(session,name)
+            counter += 1
+        return (session,True)
+    else:
+        croak("Failed to suspend VM: %s" % name)
 
 def resetVM(session,name):
 
@@ -268,12 +306,11 @@ def fullCloneVM(session,srcname,dstname):
     return vmxfile
     
 
-def quickCloneVM(session,srcname,dstname):
+def quickCloneVM(session,srcname,dstname=None):
     """
     """
     if not srcname:
-        LOG.error("Error cloning the VM: srcname wasn't specified")
-        return (session,'undef')
+        croak("Error cloning the VM: srcname wasn't specified")
 
     if not dstname:
         # Create a UUID for the name and check that if doesn't exist 
@@ -290,46 +327,44 @@ def quickCloneVM(session,srcname,dstname):
     else:
         s,r = isRegisteredVM(session,dstname)
         if r:
-            LOG.error("The dest_name %s matches and existing VM. Please use another name" % dstname)
-            return (session,'undef')
+            croak("The dest_name %s matches and existing VM. Please use another name" % dstname)
         if __isSnapshotByName(session,dstname):
-            LOG.error("The dest_name %s matches and existing VM Snapshot name. Please use another name" % dstname)
-            return (session,'undef')
+            croak("The dest_name %s matches and existing VM Snapshot name. Please use another name" % dstname)
 
     s,src_state = getStateVM(session,srcname)
     
     # Check to make the VM is either powered off or suspended. If it's not in either
     # of these states try to suspend it
     if not src_state == 'poweredoff' and not src_state == 'suspended':
-        s,r1 = suspendVM(session,srcname)
-        if r1:
-            src_state = 'suspended'
-        else:
-            # If we can't suspend the VM die...
-            return (session,'undef')
+        # Try to suspend the VM
+        suspendVM(session,srcname)
+        # Check State again...
+        s,src_state = getStateVM(session,srcname)
+
+        if not src_state == 'poweredoff' and not src_state == 'suspended':
+            croak("Error on quick clone of VM. Source VM state is %s" % src_state)
 
     src_vm = getVMbyName(session,srcname)
 
     if src_vm.getSnapshot():
-        LOG.error('Cannot quick clone it has snapshots for %s. Delete the snapshots and try again' % srcname)
-        return (session,'undef')
+        croak('Cannot quick clone it has snapshots for %s. Delete the snapshots and try again' % srcname)
+
+    LOG.debug("Quick cloning %s to %s" % (srcname,dstname))
 
     # Make the copy
     session,vmxfile = quickCopyVM(session,srcname,dstname)
 
     configSpec = VirtualMachineConfigSpec()
-    # Note. The annotation is hardcoded for now. It should read the
-    # 'default_quick_clone_master_annotation' key from the XML config
-    configSpec.setAnnotation("When performing a quick clone, we annotate the source VM in order to inform the user to NEVER alter the source VM ever again")
+    configSpec.setAnnotation(getArg("default_quick_clone_master_annotation","honeyclient::manager::esx"))
     
     try:
         task = src_vm.reconfigVM_Task(configSpec) 
         if not task.waitForMe() == Task.SUCCESS:
-            LOG.error('Failed to reconfig the VM for a quickCopy')
-            return (session,'undef')
+            msg = "Error copying %s to %s" % (srcname,dstname)
+            croak(msg)
     except MethodFault,detail:
-        LOG.error('Error occured reconfiguring the VM')
-        return (session,'undef')
+        msg = "Error copying %s to %s Reason: %s" % (srcname,dstname,detail)
+        croak(msg)
     
     # register the VM
     registerVM(session,vmxfile,dstname)
@@ -346,8 +381,7 @@ def quickCloneVM(session,srcname,dstname):
 
             vdsk_fmt = dev.getBacking()
             if not isinstance(vdsk_fmt,VirtualDiskFlatVer1BackingInfo) and not isinstance(vdsk_fmt,VirtualDiskFlatVer2BackingInfo):
-                LOG.error("Error copying %s to %s. Unsupported disk format." % (src_name, dst_name))
-                return (session,"undef")
+                croak("Error copying %s to %s. Unsupported disk format." % (srcname, dst_name))
             
             dest_dev = None
             for devA in dst_vm.getConfig().getHardware().getDevice():
@@ -356,17 +390,16 @@ def quickCloneVM(session,srcname,dstname):
                     break
 
             # Modify the backing VMDK filename for this virtual disk.
-            dest_dev.getBacking().setFilename(dev.getBacking().getFilename())
+            dest_dev.getBacking().setFileName(dev.getBacking().getFileName())
             
             # Create a virtual device config spec for this virtual disk. 
             vm_device_spec = VirtualDeviceConfigSpec()
             vm_device_spec.setDevice(dest_dev)
             vm_device_spec.setOperation(VirtualDeviceConfigSpecOperation.edit)
-            
             vm_device_specs.append(vm_device_spec)
 
     dconfigSpec.setDeviceChange(vm_device_specs)
-    dconfigSpec.setAnnotation("Type: Quick Cloned VM\n Master VM: " + src_name)
+    dconfigSpec.setAnnotation("Type: Quick Cloned VM\n Master VM: " + srcname)
     optvalue = OptionValue()
     optvalue.setKey("uuid.action")
     optvalue.setValue("create")
@@ -376,15 +409,13 @@ def quickCloneVM(session,srcname,dstname):
     try:
         taskA = dst_vm.reconfigVM_Task(dconfigSpec) 
         if not taskA.waitForMe() == Task.SUCCESS:
-            LOG.error('Failed to reconfig the dest VM for a quickCopy')
-            return (session,'undef')
+            croak("Failed to reconfig the dest VM for a quickCopy")
     except MethodFault,detail:
-        LOG.error('Error occured reconfiguring the VM')
-        return (session,'undef')
+        croak("Failed to reconfig the dest VM for a quickCopy. Reason: %s",detail)
     
     # Now make a snapshot
-    snapname = "Initial Snapshot - DO NOT ALTER OR RENAME THIS SNAPSHOT"
-    snapdesc = "State: Initialized - This snapshot marks the initial state of this clone VM, that is then used by all subsequent snapshots.  WARNING: If you alter delete this snapshot (or any dependent snapshots), then all dependent snapshots will become corrupted as well."
+    snapname = getArg("default_quick_clone_snapshot_name","honeyclient::manager::esx")
+    snapdesc = getArg("default_quick_clone_snapshot_description","honeyclient::manager::esx")
     ignore_collisions = True
 
     # Make an initial snapshot
@@ -392,20 +423,88 @@ def quickCloneVM(session,srcname,dstname):
 
     # Start the VM
     startVM(session,dstname)
+
+    # If the Master VM was suspended, then this clone
+    # will awake from a suspended state.  We'll still
+    # need to issue a full reboot, in order for the
+    # clone to get assigned a new network MAC address.
+    if src_state == 'suspended':
+        resetVM(session,dstname)
         
     return (session,dstname)
 
 
-def isQuickCloneVM(session,vmname):
+def isQuickCloneVM(session,name):
     """
-    What constitutes a quick clone?
     """
-    pass
+    vm = getVMbyName(session,name)
+
+    # Helper function that searches all the backing files of each virtual
+    # disk and determines if any of them are located outside the VM's main
+    # directory.
+    # 
+    # Inputs: the VM config
+    # Outputs: true if the VM is a quick clone; false otherwise
+    def isBackingQuickClone(config):
+        vm_dirname = os.path.dirname(config.getFiles().getVmPathName())
+
+        for dev in config.getHardware().getDevice():
+            if isinstance(dev,VirtualDisk):
+                vdsk_fmt = dev.getBacking()
+                if not isinstance(vdsk_fmt,VirtualDiskFlatVer1BackingInfo) and not isinstance(vdsk_fmt,VirtualDiskFlatVer2BackingInfo):
+                    # If the disk format isn't file-based, then it's definately a
+                    # quick clone.
+                    return True
+                
+                backing_dirname = os.path.dirname(dev.getBacking().getFileName())
+                if vm_dirname != backing_dirname:
+                    # If the backing directory is different than the VM's
+                    # directory, then it's a quick clone.
+                    return True
+        return False
+    
+    if isBackingQuickClone(vm.getConfig()):
+        return (session,True)
+
+
+    # Helper function that searches all the snapshots of a VM and determines
+    # if any of the backing virtual disks are located outside the VM's main
+    # directory.
+    # 
+    # Inputs: snapshot_list
+    # Outputs: true if the VM is a quick clone; false otherwise
+
+    # REWORK THIS BELOW. ERROR IS HAPPENING WHEN YOU PASS SNAP
+    # to isBackingQuickClone(). Snapshot is NOT a VM...
+    def findQuickCloneSnapshots(snap_list):
+        for item in snap_list:
+
+            oh_snap = item.getSnapshot()
+            print "The snapshot is a %r" % oh_snap
+            snap_view = MorUtil.createExactManagedObject(session.getServerConnection(),oh_snap)
+
+            if isBackingQuickClone(snap_view.getConfig()):
+                return True
+            
+            # If we have children, check them...
+            chillin = item.getChildSnapshotList()
+            if chillin and findQuickCloneSnapshots(chillin):
+                return True
+
+        return False
+
+    snapInfo = vm.getSnapshot()
+    if snapInfo and snapInfo.getRootSnapshotList() and findQuickCloneSnapshots(snapInfo.getRootSnapshotList()):
+        return (session,True)
+    
+    return (session,False)
+
 
 def getDatastoreSpaceAvailableVM(session,name):
     """
     Return all the freespace in the datastore(s) associated with the VM
     returns (session,{}) where the hash is {name of datastore: freespace}
+    (TESTED)
     """
     results = {}
 
@@ -425,9 +524,10 @@ def getHostnameESX(session):
     """
     Get hostname of the ESX server. Although the search returns a list
     of HostSystems, we only check the first for the hostname
-    returns (session,hostname) on success or (session,'undef') if hostname is not found
+    returns (session,hostname) on success or (session,None) if hostname is not found
+    (TESTED)
     """
-    hostname = "undef"
+    hostname = None
     rootFolder = session.getRootFolder()
     list = InventoryNavigator(rootFolder).searchManagedEntities("HostSystem")
     if list:
@@ -439,9 +539,10 @@ def getIPaddrESX(session):
     """
     Get the IP address of the ESX server. Although both the HostSystems and VirtualNic calls
     return an array of values, we only check the first of each.
-    returns (session,ip) on success or (session,'undef') if the IP address is not found
+    returns (session,ip) on success or (session,None) if the IP address is not found
+    (TESTED)
     """
-    ip = "undef"
+    ip = None
     rootFolder = session.getRootFolder()
     list = InventoryNavigator(rootFolder).searchManagedEntities("HostSystem")
     if list:
@@ -456,10 +557,13 @@ def getMACaddrVM(session,name):
     Get the macaddress of the VMs first NIC
     vmname: the name of the VM
     returns (session,mac)
+    (TESTED)
     """
-    mac = ""
-
+    mac = None
     vm = getVMbyName(session,name)
+
+    if not vm:
+        croak("Couldn't find VM %s" % name)
      
     nics = vm.getGuest().getNet()
     if nics and len(nics) > 0:
@@ -471,9 +575,9 @@ def getIPaddrVM(session,name):
     """
     Get the IP address for a VMs first NIC
     vmname: Is the name of the VM
-    returns: (session,IP) on success or (session,error) on fail
+    returns: (session,IP) on success or (session,None) on fail
     """
-    ip = ""
+    ip = None
     vm = getVMbyName(session,name)
 
     nics = vm.getGuest().getNet()
@@ -972,6 +1076,14 @@ def quickCopyVM(session,src_name,dst_name):
         return (session,'undef')
     
     return (session,dest_vmx)
+
+
+def croak(msg):
+    """
+    Helper method for logging an Error and exiting
+    """
+    LOG.error(msg)
+    sys.exit(msg)
     
 
     
