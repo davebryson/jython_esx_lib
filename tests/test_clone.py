@@ -17,7 +17,7 @@ class TestCloneVm(unittest.TestCase):
         s = login(self.url,self.un,self.pw)
         
         s,state0 = getStateVM(s,self.testvm)
-        if state0 == 'poweredOn':
+        if state0 == 'poweredOn' or state0 == 'suspended':
             s,stopit = stopVM(s,self.testvm)
             self.assertTrue(stopit)
 
