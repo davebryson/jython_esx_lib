@@ -777,7 +777,7 @@ def renameSnapshotVM(session,vmname,old_name=None,new_name=None,desc=None):
     snapshot_tree = None
     snapInfo = vm.getSnapshot()
     if snapInfo and snapInfo.getRootSnapshotList():
-        snapshot_tree = __findSnapshot(snapInfo.getRootsnapshotList(),old_name):
+        snapshot_tree = __findSnapshot(snapInfo.getRootsnapshotList(),old_name)
     
     if not snapshot_tree:
         croak("Problem renaming the snapshot.  Snapshot: %s not found." % old_name)
