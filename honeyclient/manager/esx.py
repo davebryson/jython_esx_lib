@@ -37,6 +37,7 @@ def login(service_url,un,pw):
     pw: password
     
     returns a 'session' object to pass to other functions
+    (TESTED)
     """
     try:
        return ServiceInstance(URL(service_url),un,pw,True)
@@ -45,7 +46,8 @@ def login(service_url,un,pw):
 
 def logout(session):
     """
-    Logout the current session 
+    Logout the current session
+    (TESTED)
     """
     session.getServerConnection().logout()
     return None
@@ -54,6 +56,7 @@ def isRegisteredVM(session,vm_name):
     """
     Given a vm_name check if it's registered
     returns (session,True)
+    (TESTED)
     """
     vm = getVMbyName(session,vm_name)
     if vm:
@@ -65,6 +68,7 @@ def listAllRegisteredVMS(session):
     """ 
     Get a list of the names of registered VMs
     returns (session,list)
+    (TESTED)
     """
     rootFolder = session.getRootFolder()
     list = InventoryNavigator(rootFolder).searchManagedEntities("VirtualMachine")
@@ -76,7 +80,7 @@ def listAllRegisteredVMS(session):
 
 
 def registerVM(session,path,name):
-    """ TODO """
+    """ TODO (TESTED) """
     rootFolder = session.getRootFolder()
     data_center = InventoryNavigator(rootFolder).searchManagedEntity("Datacenter","ha-datacenter")
     hostsystem_list = InventoryNavigator(rootFolder).searchManagedEntities("HostSystem")
@@ -121,6 +125,7 @@ def getStateVM(session,name):
     """
     Get the state of a given VM
     return (session,state) or (session,"error") if vm not found
+    (TESTED)
     """
     vm = getVMbyName(session,name)
     state = vm.getRuntime().getPowerState()
@@ -130,13 +135,14 @@ def startVM(session,name):
     """
     Start a VM by name
     return (session, True|False)
+    (TESTED)
     """
     s,state = getStateVM(session,name)
     if state == 'poweredOn':
         return (session,True)
     
-    if state == 'suspended':
-        croak("Cannot start a suspended VM: %s" % name)
+    #if state == 'suspended':
+    #    croak("Cannot start a suspended VM: %s" % name)
 
     vm = getVMbyName(session,name)
     task = vm.powerOnVM_Task(None)
@@ -161,6 +167,7 @@ def stopVM(session,name):
     """
     Stop a VM by name
     return (session, True|False)
+    (TESTED)
     """
 
     s,state = getStateVM(session,name)
@@ -191,6 +198,9 @@ def stopVM(session,name):
         
 
 def rebootVM(session,name):
+    """
+    (TESTED)
+    """
 
     vm = getVMbyName(session,name)
 
@@ -201,6 +211,9 @@ def rebootVM(session,name):
         croak("Reboot failed for VM: %s!" % name)
 
 def suspendVM(session,name):
+    """
+    (TESTED)
+    """
 
     s,state = getStateVM(session,name)
     if state == 'suspended':
@@ -227,7 +240,9 @@ def suspendVM(session,name):
         croak("Failed to suspend VM: %s" % name)
 
 def resetVM(session,name):
-
+    """
+    (TESTED)
+    """
     vm = getVMbyName(session,name)
 
     try:
@@ -255,6 +270,8 @@ def fullCloneVM(session,srcname,dstname):
     4. Make a full copy of it
     5. register the copy
     6. If it was suspended reset it
+
+    (TESTED)
     """
     if not srcname:
         LOG.error("Error cloning the VM: srcname wasn't specified")
@@ -308,6 +325,7 @@ def fullCloneVM(session,srcname,dstname):
 
 def quickCloneVM(session,srcname,dstname=None):
     """
+    (TESTED)
     """
     if not srcname:
         croak("Error cloning the VM: srcname wasn't specified")
@@ -436,6 +454,7 @@ def quickCloneVM(session,srcname,dstname=None):
 
 def isQuickCloneVM(session,name):
     """
+    (TESTED)
     """
     vm = getVMbyName(session,name)
 
@@ -576,6 +595,7 @@ def getIPaddrVM(session,name):
     Get the IP address for a VMs first NIC
     vmname: Is the name of the VM
     returns: (session,IP) on success or (session,None) on fail
+    (TESTED)
     """
     ip = None
     vm = getVMbyName(session,name)
@@ -594,6 +614,7 @@ def getConfigVM(session,name):
     Get the .vmx file information
     vmname: the name of the VM
     return (session,filename)
+    (TESTED)
     """
     vm = getVMbyName(session,name)
     
@@ -609,6 +630,7 @@ def destroyVM(session,vmname):
     Destroy a registered VM
     vmname: the name of the VM
     returns the session on success or dies on failure
+    (TESTED)
     """
     s,state = getStateVM(session,vmname)
     if state == 'poweredOn':
@@ -636,6 +658,7 @@ def snapshotVM(session,name,snapshot_name,desc,ignore_collisions=False):
     desc: a description of the snapshot
     ignore_collisions: whether to check for existing VMs and snapshots with the same name
     returns (session,snapshot name) on success and (session, 'undef') on failure
+    (TESTED)
     """
     vm = getVMbyName(session,name)
 
@@ -684,6 +707,7 @@ def getAllSnapshotsVM(session,name):
 
     vm = getVMbyName(session,name)
     
+    # This will fail if there's no snapshot
     snapInfo = vm.getSnapshot()
     snapTree = snapInfo.getRootSnapshotList()
     for node in snapTree:
@@ -715,8 +739,61 @@ def revertVM(session,vmname,snapshot_name):
     else:
         return (session,False)
 
-def renameSnapshotVM(session,vmname,old_name,new_name):
-    pass
+def renameSnapshotVM(session,vmname,old_name=None,new_name=None,desc=None):
+    """
+    Rename a snapshot
+    vmname: the name of the VM containing the snapshot
+    old_name: the name of the snapshot
+    new_name: the new name, if blank a name will be generated
+    desc: Add a description for the renamed VM (optional)
+    """
+    vm = getVMbyName(session,vmname)
+
+    if not old_name:
+        croak("You must specifiy the old name of the snapshot you want to rename!")
+
+    if not new_name:
+        # Create a UUID for the name and check that if doesn't exist 
+        while(True):
+            new_name = __generateVMID()
+            # First check to see it's NOT a registered VM name
+            # if it does match an existing name, keep trying with another name
+            s,r = isRegisteredVM(session,new_name)
+            if not r:
+                # Next, check there are NO snapshots with the same name
+                if not __isSnapshotByName(session,new_name):
+                    # If we didn't find the name in all the snapshots, we're done
+                    break
+    else:
+        s,r = isRegisteredVM(session,new_name)
+        if r:
+            croak("The new_name %s matches and existing VM. Please use another name" % new_name)
+        if __isSnapshotByName(session,new_name):
+            croak("The new_name %s matches and existing VM Snapshot name. Please use another name" % new_name)
+
+    if not desc:
+        desc = new_name
+
+    snapshot_tree = None
+    snapInfo = vm.getSnapshot()
+    if snapInfo and snapInfo.getRootSnapshotList():
+        snapshot_tree = __findSnapshot(snapInfo.getRootsnapshotList(),old_name):
+    
+    if not snapshot_tree:
+        croak("Problem renaming the snapshot.  Snapshot: %s not found." % old_name)
+
+    # Get the VirtualMachineSnapshot object.
+    oh_snap = snapshot_tree.getSnapshot()
+    snapshot = MorUtil.createExactManagedObject(session.getServerConnection(),oh_snap)
+    
+    try:
+        snapshot.renameSnapshot(name_name,desc)
+    except:
+        croak("Error encountered remaining the snapshot")
+    
+    return (session,new_name)
+    
+    
 
 def removeSnapshotVM(session,name,snapshot_name,removeChild=True):
     """
@@ -795,30 +872,28 @@ def __findByNameInSnapshotTree(snapTree,name):
     return False
 
 
-def __getSnapshotInTree(vm,snapshot_name):
+#def __getSnapshotInTree(vm,snapshot_name):
+#
+#    if vm == None or snapshot_name == None:
+#        print "Error missing VM and or snapshot_name"
+#        return False
+#
+#    snapTree = vm.getSnapshot().getRootSnapshotList()
+#    if snapTree:
+#        return  __findSnapshotInTree(snapTree, snapshot_name)
+#    else:
+#        return None
 
-    if vm == None or snapshot_name == None:
-        print "Error missing VM and or snapshot_name"
-        return False
-
-    snapTree = vm.getSnapshot().getRootSnapshotList()
-    if snapTree:
-        return  __findSnapshotInTree(snapTree, snapshot_name)
-    else:
-        return None
-
-def __findSnapshotInTree(snapTree, snapshot_name):
-    for node in snapTree:
-        if snapshot_name == node.getName():
-            #return node.getSnapshot()
-            return True
+def __findSnapshot(snapshot_list, snapshot_name):
+    for snapshot_tree in snapshot_list:
+        if snapshot_name == snapshot_tree.getName():
+            return snapshot_tree
         else:
             # check the children
-            childTree = node.getChildSnapshotList()
+            childTree = snapshot_tree.getChildSnapshotList()
             if childTree:
-                __findSnapshotInTree(childTree, snapshot_name)
-            else:
-                return False
+                __findSnapshot(childTree, snapshot_name)
+    return None
 
 
 def __generateVMID():
