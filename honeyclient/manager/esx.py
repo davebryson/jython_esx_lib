@@ -128,6 +128,11 @@ def getStateVM(session,name):
     (TESTED)
     """
     vm = getVMbyName(session,name)
+
+    # Add
+    # state = vm.getRuntime().getQuestion()
+    # See: VirtualMachineQuestionInfo for extracting info...
+
     state = vm.getRuntime().getPowerState()
     return (session,str(state))
 
@@ -823,6 +828,37 @@ def removeSnapshotVM(session,name,snapshot_name,removeChild=True):
 """ Helper methods below """
 
 
+def answerVM(session,name):
+    """
+    Tries to answer question posed by the server
+    returns: session
+    """
+    powerState = "undef"
+    s, powerState = getStateVM(session,name)
+    if not powerState == 'pendingquestion':
+        return session
+
+    vm = getVMbyName(session,name)
+    question = vm.getRuntime().getQuestion()
+    questionId = question.getId()
+
+    choice = ""
+    if questionId == 'msg.uuid.moved':
+        choice = "3"
+    elif questionId == 'msg.disk.adapterMismatch':
+        choice = "0"
+    else:
+        croak("Encountered unknown question for VM  %s" % name)
+
+    # NOW answer the VM
+    try:
+        vm.answerVM(questionID,choice)
+    except:
+        croak("Error answering question on VM %s" % name)
+
+    return session
+        
+
 def getVMbyName(session,name):
     """
     Return the VirtualMachine object for a VM by name. If the VM is NOT
@@ -830,10 +866,7 @@ def getVMbyName(session,name):
     """
     rootFolder = session.getRootFolder()
     vm = InventoryNavigator(rootFolder).searchManagedEntity("VirtualMachine",name)
-    #if not vm:
-    #    msg = "Could not find VM with name: \'%s\'." % name
-    #    LOG.error(msg)
-    #    sys.exit(msg)
+
     return vm
 
 
