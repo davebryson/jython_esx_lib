@@ -26,6 +26,7 @@ from com.vmware.vim25.mo.util import *
 
 import os.path,re,uuid,sys,time
 from honeyclient.util.config import *
+from time import sleep
 
 
 def login(service_url,un,pw):
@@ -58,7 +59,8 @@ def isRegisteredVM(session,vm_name):
     returns (session,True)
     (TESTED)
     """
-    vm = getVMbyName(session,vm_name)
+    rootFolder = session.getRootFolder()
+    vm = InventoryNavigator(rootFolder).searchManagedEntity("VirtualMachine",vm_name)
     if vm:
         return (session,True)
     else:
@@ -102,9 +104,9 @@ def registerVM(session,path,name):
     try:
         task = vm_folder.registerVM_Task(path,name,False,resource.getResourcePool(),host)
         if task.waitForMe() != Task.SUCCESS:
-            LOG.error("Failed to register VM: %s",name)
+            croak("Failed to register VM: %s",name)
     except MethodFault, detail:
-        LOG.error("Error registering the VM. Reason: %s" % detail.getMessage())
+        croak("Error registering the VM. Reason: %s" % detail.getMessage())
 
     return session
 
@@ -114,12 +116,17 @@ def unRegisterVM(session,name):
     """
     vm = getVMbyName(session,name)
 
+    #if not vm:
+    #    return (session,'undef')
+
     try:
+        fn = vm.getConfig().getFiles().getVmPathName()
         vm.unregisterVM()
-        return (session,True)
+        return (session,fn)
+    
     except MethodFault,detail:
         LOG.error("Error unregistering VM: %s. Reason: %s" % (name,detail.getMessage()))
-        return (session,False)
+        return (session,'undef')
 
 def getStateVM(session,name):
     """
@@ -128,13 +135,17 @@ def getStateVM(session,name):
     (TESTED)
     """
     vm = getVMbyName(session,name)
+    state = ''
 
-    # Add
-    # state = vm.getRuntime().getQuestion()
-    # See: VirtualMachineQuestionInfo for extracting info...
-
-    state = vm.getRuntime().getPowerState()
-    return (session,str(state))
+    # Check for possible pending questions
+    if vm.getRuntime().getQuestion():
+        state = 'pendingquestion'
+    elif vm.getRuntime().getPowerState():
+        state = str(vm.getRuntime().getPowerState())
+    else:
+        croak("Could not get execution state of %s" % name)
+    
+    return (session,state)
 
 def startVM(session,name):
     """
@@ -145,25 +156,18 @@ def startVM(session,name):
     s,state = getStateVM(session,name)
     if state == 'poweredOn':
         return (session,True)
-    
-    #if state == 'suspended':
-    #    croak("Cannot start a suspended VM: %s" % name)
 
+    if state == 'pendingquestion':
+        session = answerVM(session,name)
+        session,state = getStateVM(session,name)
+    
     vm = getVMbyName(session,name)
     task = vm.powerOnVM_Task(None)
-    # This doesn't actually wait long enough in most cases
-    flag = task.waitForMe()
+    
+    flag = __poll_task_for_question(task,session,name)
+    #flag = task.waitForMe()
 
     if flag == Task.SUCCESS:
-        s,state1 = getStateVM(session,name)
-        
-        # My spin loop to wait for the thing to actually start
-        counter = 0
-        while state1 != 'poweredOn' and counter < 10:
-            time.sleep(1)
-            s,state1 = getStateVM(session,name)
-            counter += 1
-
         return (session,True)
     else:
         croak("Could not start VM %s" % name)
@@ -187,16 +191,8 @@ def stopVM(session,name):
     vm = getVMbyName(session,name)
 
     task = vm.powerOffVM_Task()
-    flag = task.waitForMe()
+    flag = __poll_task_for_question(task,session,name)
     if flag == Task.SUCCESS:
-        s,state1 = getStateVM(session,name)
-        
-        # My spin loop to wait for the thing to actually stop
-        counter = 0
-        while state1 != 'poweredOff' and counter < 10:
-            time.sleep(1)
-            s,state1 = getStateVM(session,name)
-            counter += 1
         return (session,True)
     else:
         croak("Could not stop the VM: %s" % name)
@@ -206,7 +202,6 @@ def rebootVM(session,name):
     """
     (TESTED)
     """
-
     vm = getVMbyName(session,name)
 
     try: 
@@ -230,16 +225,8 @@ def suspendVM(session,name):
     vm = getVMbyName(session,name)
     
     task = vm.suspendVM_Task()
-    flag = task.waitForMe()
+    flag = __poll_task_for_question(task,session,name)
     if flag == Task.SUCCESS:
-        s,state1 = getStateVM(session,name)
-        
-        # My spin loop to wait for the thing to actually suspend
-        counter = 0
-        while state1 != 'suspended' and counter < 10:
-            time.sleep(1)
-            s,state1 = getStateVM(session,name)
-            counter += 1
         return (session,True)
     else:
         croak("Failed to suspend VM: %s" % name)
@@ -250,23 +237,20 @@ def resetVM(session,name):
     """
     vm = getVMbyName(session,name)
 
-    try:
-        task = vm.resetVM_Task()
-        if task.waitForMe() == Task.SUCCESS:
-            return (session,True)
-        else:
-            LOG.error("Failed to reset VM: %s" % name)
-            return (session,False)
-    except:
-        LOG.error("Failed to reset VM: %s" % name)
-        return (session,False)
+    task = vm.resetVM_Task()
+    flag = __poll_task_for_question(task,session,name)
+    if flag == Task.SUCCESS:
+        return (session,True)
+    else:
+        croak("Failed to reset VM: %s" % name)
 
-def fullCloneVM(session,srcname,dstname):
+
+def fullCloneVM(session,srcname,dstname=None):
     """
     Create a full copy of the src VM to the destination folder, To include associated files (vmdk,nvram, etc...)
     srcname: is the name of the existing VM to clone
     dstname: is the name of the new directory to copy the VM to.
-    returns (session,path_to_the_copy.vmx) or (session,'undef') if the copy fails
+    returns (session,dstname) or (session,'undef') if the copy fails
 
     Steps:
     1. Generate a VMID if dstname wasn't given
@@ -308,13 +292,13 @@ def fullCloneVM(session,srcname,dstname):
     
     # Check to make the VM is either powered off or suspended. If it's not in either
     # of these states try to suspend it
-    if not src_state == 'poweredOff' and not src_state == 'suspended':
-        s,isSuspended = suspendVM(session,srcname)
-        if isSuspended:
-            src_state = 'suspended'
-        else:
+    if src_state == 'poweredOn':
+        suspendVM(session,srcname)
+        s,src_state = getStateVM(session,srcname)
+
+        if src_state == 'poweredOn':
             # If we can't suspend the VM die...
-            return (session,'undef')
+            croak("Cannot perform a fullclone of VM %s - the VM is not suspended or off" % srcname)
     
     session,vmxfile = fullCopyVM(session,srcname,dstname)
 
@@ -325,7 +309,7 @@ def fullCloneVM(session,srcname,dstname):
     if src_state == 'suspended':
         resetVM(session,dstname)
 
-    return vmxfile
+    return (session,dstname)
     
 
 def quickCloneVM(session,srcname,dstname=None):
@@ -358,15 +342,14 @@ def quickCloneVM(session,srcname,dstname=None):
     
     # Check to make the VM is either powered off or suspended. If it's not in either
     # of these states try to suspend it
-    if not src_state == 'poweredoff' and not src_state == 'suspended':
-        # Try to suspend the VM
+    if src_state == 'poweredOn':
         suspendVM(session,srcname)
-        # Check State again...
         s,src_state = getStateVM(session,srcname)
 
-        if not src_state == 'poweredoff' and not src_state == 'suspended':
-            croak("Error on quick clone of VM. Source VM state is %s" % src_state)
-
+        if src_state == 'poweredOn':
+            # If we can't suspend the VM die...
+            croak("Cannot perform a quickclone of VM %s - the VM is not suspended or off" % srcname)
+    
     src_vm = getVMbyName(session,srcname)
 
     if src_vm.getSnapshot():
@@ -534,9 +517,9 @@ def getDatastoreSpaceAvailableVM(session,name):
 
     vm = getVMbyName(session,name)
 
-    if not vm:
-        print "VM %s not found!" % name
-        return (session,False)
+    #if not vm:
+    #    print "VM %s not found!" % name
+    #    return (session,False)
 
     for d in vm.getDatastores():
         info = d.getInfo()
@@ -586,8 +569,8 @@ def getMACaddrVM(session,name):
     mac = None
     vm = getVMbyName(session,name)
 
-    if not vm:
-        croak("Couldn't find VM %s" % name)
+    #if not vm:
+    #    croak("Couldn't find VM %s" % name)
      
     nics = vm.getGuest().getNet()
     if nics and len(nics) > 0:
@@ -638,19 +621,23 @@ def destroyVM(session,vmname):
     (TESTED)
     """
     s,state = getStateVM(session,vmname)
+    
     if state == 'poweredOn':
         #stop it
         stopVM(session,vmname)
     
-    LOG.warn("TODO: NEED TO CHECK FOR QUICK CLONES HERE!")
-
+    if isQuickCloneVM(s,vmname):
+        LOG.info("Deleting VM %s" % vmname)
+        __delete_filesVM(s,vmname)
+        return s
+        
     vm = getVMbyName(session,vmname)
     try:
         task = vm.destroy_Task()
         if not task.waitForMe() == Task.SUCCESS:
-            sys.exit("Error destroying VM: %s" % vmname)
+            croak("Error destroying VM: %s" % vmname)
     except:
-        sys.exit("Error destroying VM: %s" % vmname)
+        croak("Error destroying VM: %s" % vmname)
 
     return session
 
@@ -841,21 +828,28 @@ def answerVM(session,name):
     vm = getVMbyName(session,name)
     question = vm.getRuntime().getQuestion()
     questionId = question.getId()
+    questionMsg = question.getText().strip().split(":")[0]
+
+    #lista = question.getChoice().getChoiceInfo()
+    #for l in lista:
+    #    print("label: %s   Summary: %s" % (l.getLabel(),l.getSummary()))
 
     choice = ""
-    if questionId == 'msg.uuid.moved':
-        choice = "3"
-    elif questionId == 'msg.disk.adapterMismatch':
+    if questionMsg == 'msg.uuid.moved':
+        choice = "2" # Always create
+    elif questionMsg == 'msg.disk.adapterMismatch':
         choice = "0"
     else:
         croak("Encountered unknown question for VM  %s" % name)
 
     # NOW answer the VM
     try:
-        vm.answerVM(questionID,choice)
-    except:
-        croak("Error answering question on VM %s" % name)
-
+        vm.answerVM(questionId,choice)
+    except Exception, e:
+        croak("Error answering question on VM %r" % e)
+        
+    time.sleep(2)
+        
     return session
         
 
@@ -867,8 +861,10 @@ def getVMbyName(session,name):
     rootFolder = session.getRootFolder()
     vm = InventoryNavigator(rootFolder).searchManagedEntity("VirtualMachine",name)
 
-    return vm
-
+    if vm:
+        return vm
+    else:
+        croak("VM name: %s not found" % name)
 
 
 def getAllVMS(session):
@@ -965,9 +961,9 @@ def fullCopyVM(session,src_name,dst_name):
     
     # Now get the VirtualMachine we're copying
     vm = getVMbyName(session,src_name)
-    if not vm:
-        print "No VirtualMachine found with name %s" % src_name
-        return (session,'undef')
+    #if not vm:
+    #    print "No VirtualMachine found with name %s" % src_name
+    #    return (session,'undef')
 
     # Get the name of the datastore that holds the source VM
     # We assume the source VM is located on only one datastore.
@@ -1192,8 +1188,91 @@ def croak(msg):
     """
     LOG.error(msg)
     sys.exit(msg)
-    
 
-    
 
+def __delete_filesVM(session,name):
+
+    # Must get this info BEFORE unregistering the VM
+    vm = getVMbyName(session,name)
+    datastore_list = vm.getDatastores()
+    vm_dirname = os.path.dirname(vm.getConfig().getFiles().getVmPathName())
+
+    session,config = unRegisterVM(session,name)
+    
+    fileMgr = session.getFileManager()
+    datacenter_view = InventoryNavigator(session.getRootFolder()).searchManagedEntity("Datacenter","ha-datacenter")
+
+    file_list = []
+    for data_storage in datastore_list:
+        browser = data_storage.getBrowser()
+            
+        file_list.append(vm_dirname)
+        
+        search_spec = HostDatastoreBrowserSearchSpec()
+        search_spec.setSortFoldersFirst(True)
+        
+        task = browser.searchDatastoreSubFolders_Task(vm_dirname,search_spec)
+        if task.waitForMe() == Task.SUCCESS:
+            results = task.getTaskInfo().getResult().getHostDatastoreBrowserSearchResults()
+            
+            for r in results:
+                folder = r.getFolderPath()
+                for f in r.getFile():
+                    file_list.append( "/".join([folder,f.getPath()]) )
+        else:
+            croak("SubFolder search failed!")
+            
+        reversed_list = sorted(file_list,reverse=True)
+
+        for i in reversed_list:
+            task1 = fileMgr.deleteDatastoreFile_Task(i,datacenter_view)
+            if not task1.waitForMe() == Task.SUCCESS:
+                croak("Unable to delete all of the VM files for VM (%s)" % name)
+                
+    return True
+
+
+
+def __poll_task_for_question(t,session,vmname):
+    """
+    Checks for questions from ESX. This is a wrapper for the task
+    param: t the task
+    param: session the session
+    params: vmname: The VM name
+    """
+    tState = None
+    tries = 0 
+    maxTries= 3
+    problem = None
+
+    while tState == None or tState == str(TaskInfoState.running) or tState == str(TaskInfoState.queued):
+        tState = None
+        problem = None
+        tries=0
+
+        while tState == None:
+            tries += 1
+            
+            if tries > maxTries:
+                # Break out of the inner while
+                croak("task poller reach max tries!")
+
+            try:
+                tState = str(t.getTaskInfo().getState())
+            except Exception, e:
+                problem = e
+
+        if tState == str(TaskInfoState.running):
+            sleep(2)
+            
+            # Check if the VM is stuck
+            s, st = getStateVM(session,vmname)
+            
+            if st == 'pendingquestion':
+                print("We have a pending question!")
+                answerVM(session,vmname)
+        else:
+            sleep(1)
+
+    return str(tState)
 

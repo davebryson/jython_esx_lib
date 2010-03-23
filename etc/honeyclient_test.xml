@@ -40,7 +40,7 @@ State: Initialized - This snapshot marks the initial state of this clone VM, tha
        <password description="The password used to login to the VIM service running on the ESX server.">
          passw0rd
        </password>
-       <test_vm_name>Hive</test_vm_name>
+       <test_vm_name>WorkerBee</test_vm_name>
      </test>
    </esx>
  </manager>
