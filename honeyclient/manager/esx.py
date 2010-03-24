@@ -2,8 +2,9 @@
 
 """
 Simple Jython API for interacting with VMWare machines running on VMWare ESX Server. This 
-wrapper library makes use of the VI Java API (http://vijava.sourceforge.net/). To use this 
-module you must run it through Jython using JDK 1.6
+wrapper library makes use of the VI Java API (http://vijava.sourceforge.net/). 
+
+To use this module you must run it through Jython using JDK 1.6
 
 author Dave Bryson
 
@@ -13,9 +14,6 @@ Example use from a Jython shell:
  >> session = esx.login('https://yourserver/sdk','username','password')
  >> session,results = esx.listAllRegisteredVMS(session)
  >> for i in results: print i 
-
-NOTE: Not ready for production use!!
-
 """
 
 from java.net import URL
@@ -31,14 +29,13 @@ from time import sleep
 
 def login(service_url,un,pw):
     """
-    Login to the ESX Server
+    Login to the ESX Server and create a Session
     
-    service_url: full URL to server (https://esx_server/sdk/)
-    un: username
-    pw: password
+    :param service_url: full URL to ESX server. ex: 'https://esx_server/sdk/'
+    :param un: the account username
+    :param pw: the account password
     
-    returns a 'session' object to pass to other functions
-    (TESTED)
+    :return:  a 'session' object to pass to other functions
     """
     try:
        return ServiceInstance(URL(service_url),un,pw,True)
@@ -48,16 +45,20 @@ def login(service_url,un,pw):
 def logout(session):
     """
     Logout the current session
-    (TESTED)
+
+    :param session: the session to close
+    :return: None
     """
     session.getServerConnection().logout()
     return None
 
 def isRegisteredVM(session,vm_name):
     """
-    Given a vm_name check if it's registered
-    returns (session,True)
-    (TESTED)
+    Given the name of a VM, check if it's registered
+
+    :param session:
+    :param vm_name: the name of the VM
+    :return: (session,True | False) 
     """
     rootFolder = session.getRootFolder()
     vm = InventoryNavigator(rootFolder).searchManagedEntity("VirtualMachine",vm_name)
@@ -68,9 +69,10 @@ def isRegisteredVM(session,vm_name):
 
 def listAllRegisteredVMS(session):
     """ 
-    Get a list of the names of registered VMs
-    returns (session,list)
-    (TESTED)
+    Get a list of all registered VMs (names)
+    
+    :param session:
+    :return: (session,[names])
     """
     rootFolder = session.getRootFolder()
     list = InventoryNavigator(rootFolder).searchManagedEntities("VirtualMachine")
@@ -82,7 +84,14 @@ def listAllRegisteredVMS(session):
 
 
 def registerVM(session,path,name):
-    """ TODO (TESTED) """
+    """
+    Register the VM in the inventory
+    
+    :param session:
+    :param path: the path to the VMX file
+    :param name: the desired registered name of the VM
+    :return: session or die on error
+    """
     rootFolder = session.getRootFolder()
     data_center = InventoryNavigator(rootFolder).searchManagedEntity("Datacenter","ha-datacenter")
     hostsystem_list = InventoryNavigator(rootFolder).searchManagedEntities("HostSystem")
@@ -112,12 +121,14 @@ def registerVM(session,path,name):
 
 def unRegisterVM(session,name):
     """
-    Unregister a VM given it's name
+    Unregister/remove a VM from the Inventory
+    
+    :param session:
+    :param name: the registered name of the VM
+    :return: (session,filename of the VM) on success 
+             or (session,'undef') if the VM wasn't found
     """
     vm = getVMbyName(session,name)
-
-    #if not vm:
-    #    return (session,'undef')
 
     try:
         fn = vm.getConfig().getFiles().getVmPathName()
@@ -130,9 +141,11 @@ def unRegisterVM(session,name):
 
 def getStateVM(session,name):
     """
-    Get the state of a given VM
-    return (session,state) or (session,"error") if vm not found
-    (TESTED)
+    Get the current state of a given VM. Possible states are:
+    'poweredOn, 'poweredOff', 'suspended', pendingquestion'.
+    
+    :param name: the name of the VM
+    :return: (session,state) on success or dies on error
     """
     vm = getVMbyName(session,name)
     state = ''
@@ -150,8 +163,10 @@ def getStateVM(session,name):
 def startVM(session,name):
     """
     Start a VM by name
-    return (session, True|False)
-    (TESTED)
+    
+    :param session:
+    :param name: the name of the VM
+    :return: (session, True) or dies on error
     """
     s,state = getStateVM(session,name)
     if state == 'poweredOn':
@@ -163,10 +178,9 @@ def startVM(session,name):
     
     vm = getVMbyName(session,name)
     task = vm.powerOnVM_Task(None)
-    
-    flag = __poll_task_for_question(task,session,name)
-    #flag = task.waitForMe()
 
+    # Note: uses our 'pool' wrapper to check for pending questions
+    flag = __poll_task_for_question(task,session,name)
     if flag == Task.SUCCESS:
         return (session,True)
     else:
@@ -175,10 +189,11 @@ def startVM(session,name):
 def stopVM(session,name):
     """
     Stop a VM by name
-    return (session, True|False)
-    (TESTED)
-    """
 
+    :param session:
+    :param name: the name of the VM
+    :return: (session, True) or dies on error
+    """
     s,state = getStateVM(session,name)
     if state == 'poweredOff':
         return (session,True)
@@ -189,7 +204,6 @@ def stopVM(session,name):
         startVM(session,name)
 
     vm = getVMbyName(session,name)
-
     task = vm.powerOffVM_Task()
     flag = __poll_task_for_question(task,session,name)
     if flag == Task.SUCCESS:
@@ -200,7 +214,11 @@ def stopVM(session,name):
 
 def rebootVM(session,name):
     """
-    (TESTED)
+    Reboot the VM
+
+    :param session:
+    :param name: the name of the VM
+    :return (session,True) or die on error
     """
     vm = getVMbyName(session,name)
 
@@ -212,9 +230,12 @@ def rebootVM(session,name):
 
 def suspendVM(session,name):
     """
-    (TESTED)
+    Suspend a VM
+    
+    :param session:
+    :param name: the name of the VM
+    :return: (session,True) or die on error
     """
-
     s,state = getStateVM(session,name)
     if state == 'suspended':
         return (session,True)
@@ -223,7 +244,6 @@ def suspendVM(session,name):
         croak("Cannot suspend a poweredOff VM. VM name: %s" % name)
 
     vm = getVMbyName(session,name)
-    
     task = vm.suspendVM_Task()
     flag = __poll_task_for_question(task,session,name)
     if flag == Task.SUCCESS:
@@ -233,7 +253,11 @@ def suspendVM(session,name):
 
 def resetVM(session,name):
     """
-    (TESTED)
+    Reset (cold boot) the VM
+    
+    :param session:
+    :param name: the name of the VM
+    :return (session,True) or die on error
     """
     vm = getVMbyName(session,name)
 
@@ -248,9 +272,9 @@ def resetVM(session,name):
 def fullCloneVM(session,srcname,dstname=None):
     """
     Create a full copy of the src VM to the destination folder, To include associated files (vmdk,nvram, etc...)
-    srcname: is the name of the existing VM to clone
-    dstname: is the name of the new directory to copy the VM to.
-    returns (session,dstname) or (session,'undef') if the copy fails
+    :param srcname: is the name of the existing VM to clone
+    :param dstname: is the name of the new directory to copy the VM to.
+    :return (session,dstname) or (session,'undef') if the copy fails
 
     Steps:
     1. Generate a VMID if dstname wasn't given
@@ -314,7 +338,14 @@ def fullCloneVM(session,srcname,dstname=None):
 
 def quickCloneVM(session,srcname,dstname=None):
     """
-    (TESTED)
+    Creates a differential clone of the specified VM.
+
+    :param session:
+    :param srcname: the name of the VM to clone
+    :param dstname: (OPTIONAL) the name of the clone. If not specified UUID name will be generated  
+                    for the dstname
+
+    :return: (session,dstname) or die on error
     """
     if not srcname:
         croak("Error cloning the VM: srcname wasn't specified")
@@ -442,7 +473,11 @@ def quickCloneVM(session,srcname,dstname=None):
 
 def isQuickCloneVM(session,name):
     """
-    (TESTED)
+    Test if a given VM was made via quickclone
+
+    :param session:
+    :param name: the name of the VM
+    :return: (session, True|False)
     """
     vm = getVMbyName(session,name)
 
@@ -473,21 +508,17 @@ def isQuickCloneVM(session,name):
     if isBackingQuickClone(vm.getConfig()):
         return (session,True)
 
-
     # Helper function that searches all the snapshots of a VM and determines
     # if any of the backing virtual disks are located outside the VM's main
     # directory.
     # 
     # Inputs: snapshot_list
     # Outputs: true if the VM is a quick clone; false otherwise
-
-    # REWORK THIS BELOW. ERROR IS HAPPENING WHEN YOU PASS SNAP
-    # to isBackingQuickClone(). Snapshot is NOT a VM...
     def findQuickCloneSnapshots(snap_list):
         for item in snap_list:
 
             oh_snap = item.getSnapshot()
-            print "The snapshot is a %r" % oh_snap
+
             snap_view = MorUtil.createExactManagedObject(session.getServerConnection(),oh_snap)
 
             if isBackingQuickClone(snap_view.getConfig()):
@@ -510,16 +541,13 @@ def isQuickCloneVM(session,name):
 def getDatastoreSpaceAvailableVM(session,name):
     """
     Return all the freespace in the datastore(s) associated with the VM
-    returns (session,{}) where the hash is {name of datastore: freespace}
-    (TESTED)
+    
+    :param session:
+    :param name: the name of the VM
+    :return (session,{name,bytes})
     """
     results = {}
-
     vm = getVMbyName(session,name)
-
-    #if not vm:
-    #    print "VM %s not found!" % name
-    #    return (session,False)
 
     for d in vm.getDatastores():
         info = d.getInfo()
@@ -530,9 +558,10 @@ def getDatastoreSpaceAvailableVM(session,name):
 def getHostnameESX(session):
     """
     Get hostname of the ESX server. Although the search returns a list
-    of HostSystems, we only check the first for the hostname
-    returns (session,hostname) on success or (session,None) if hostname is not found
-    (TESTED)
+    of HostSystems, we only check the first for the hostname.
+
+    :param session:
+    :return: (session,hostname) on success or (session,None) if hostname is not found
     """
     hostname = None
     rootFolder = session.getRootFolder()
@@ -546,8 +575,9 @@ def getIPaddrESX(session):
     """
     Get the IP address of the ESX server. Although both the HostSystems and VirtualNic calls
     return an array of values, we only check the first of each.
-    returns (session,ip) on success or (session,None) if the IP address is not found
-    (TESTED)
+
+    :param session:
+    :return (session,ip) on success or (session,None) if the IP address is not found
     """
     ip = None
     rootFolder = session.getRootFolder()
@@ -562,16 +592,14 @@ def getIPaddrESX(session):
 def getMACaddrVM(session,name):
     """
     Get the macaddress of the VMs first NIC
-    vmname: the name of the VM
-    returns (session,mac)
-    (TESTED)
+   
+    :param session:
+    :param vmname: the name of the VM
+    :return (session,mac)
     """
     mac = None
     vm = getVMbyName(session,name)
 
-    #if not vm:
-    #    croak("Couldn't find VM %s" % name)
-     
     nics = vm.getGuest().getNet()
     if nics and len(nics) > 0:
         mac = nics[0].getMacAddress()
@@ -581,9 +609,10 @@ def getMACaddrVM(session,name):
 def getIPaddrVM(session,name):
     """
     Get the IP address for a VMs first NIC
-    vmname: Is the name of the VM
-    returns: (session,IP) on success or (session,None) on fail
-    (TESTED)
+    
+    :param session:
+    :param vmname: Is the name of the VM
+    :return: (session,IP) on success or (session,None) on fail
     """
     ip = None
     vm = getVMbyName(session,name)
@@ -600,9 +629,10 @@ def getIPaddrVM(session,name):
 def getConfigVM(session,name):
     """
     Get the .vmx file information
-    vmname: the name of the VM
-    return (session,filename)
-    (TESTED)
+    
+    :param session:
+    :param vmname: the name of the VM
+    :return: (session,filename) or (session,undef) on error
     """
     vm = getVMbyName(session,name)
     
@@ -616,9 +646,10 @@ def getConfigVM(session,name):
 def destroyVM(session,vmname):
     """
     Destroy a registered VM
-    vmname: the name of the VM
-    returns the session on success or dies on failure
-    (TESTED)
+    
+    :param session:
+    :param vmname: the name of the VM
+    :return the session on success or dies on failure
     """
     s,state = getStateVM(session,vmname)
     
@@ -627,7 +658,6 @@ def destroyVM(session,vmname):
         stopVM(session,vmname)
     
     if isQuickCloneVM(s,vmname):
-        LOG.info("Deleting VM %s" % vmname)
         __delete_filesVM(s,vmname)
         return s
         
@@ -644,13 +674,14 @@ def destroyVM(session,vmname):
 def snapshotVM(session,name,snapshot_name,desc,ignore_collisions=False):
     """
     Create a snapshot of an existing VM
-    where - 
-    name: the name of the snapshot to create
-    snapshot_name: the name of the snapshot
-    desc: a description of the snapshot
-    ignore_collisions: whether to check for existing VMs and snapshots with the same name
-    returns (session,snapshot name) on success and (session, 'undef') on failure
-    (TESTED)
+
+    :param session:
+    :param name: the name of the VM to snapshot
+    :param snapshot_name: the name of the snapshot
+    :param desc: a description of the snapshot
+    :param ignore_collisions: whether to check for existing VMs and snapshots with the same name
+                              (default False)
+    :return (session,snapshot name) on success or die on failure
     """
     vm = getVMbyName(session,name)
 
@@ -672,35 +703,38 @@ def snapshotVM(session,name,snapshot_name,desc,ignore_collisions=False):
     elif not ignore_collisions:
         s,r1 = isRegisteredVM(session,dstname)
         if r1:
-            LOG.error("The dest_name %s matches and existing VM. Please use another name" % dstname)
-            return (session,'undef')
+            croak("The dest_name %s matches and existing VM. Please use another name" % dstname)
         if __isSnapshotByName(session,dstname):
-            LOG.error("The dest_name %s matches and existing VM Snapshot name. Please use another name" % dstname)
-            return (session,'undef')
-    
+            croak("The dest_name %s matches and existing VM Snapshot name. Please use another name" % dstname)
     try:
         task = vm.createSnapshot_Task(snapshot_name,desc,True,True)
         if task.waitForMe() == Task.SUCCESS:
             return (session,snapshot_name)
         else:
-            return (session,'undef')
+            croak("Unable to take a snapshot of VM %s" % name)
     except MethodFault, detail:
-        LOG.error("failed to create snapshot. Reason: %s" % detail)
-        return (session,'undef')
-    
+        croak("failed to create snapshot. Reason: %s" % detail.getMessage())
 
 def getAllSnapshotsVM(session,name):
     """
-      Return the name of snapshots
-      returns (session, hash {name:[]}) where 'name' id the name of a parent snapshot
-      and '[]' is an array of the names of children of the parent snapshot
+      Return the name of all snapshots for a given VM
+
+      :param session:
+      :param name: the name of the VM
+      
+      :return (session, {name:[]}) where:
+              'name' is the name of a parent snapshot
+              and '[]' is an array of the names of the children in the parent snapshot.
+              If the VM doesn't have any snapshots, returns an empty dict
     """
     results = {}
 
     vm = getVMbyName(session,name)
     
-    # This will fail if there's no snapshot
     snapInfo = vm.getSnapshot()
+    if not snapInfo:
+        return (session,results)
+
     snapTree = snapInfo.getRootSnapshotList()
     for node in snapTree:
         childTree = []
@@ -717,27 +751,36 @@ def getAllSnapshotsVM(session,name):
 def revertVM(session,vmname,snapshot_name):
     """ 
     Revert back to a previous snapshot
-    vmname: The name of the root VM
-    snapshot_name: The name of the VM to revert to
-    returns (session,True) on success and (session,False) on fail
-    """
-    vmsnap = getSnapshotInTree(vm, snapshot_name)
-    if vmsnap:
-        task = vmsnap.revertToSnapshot_Task(None)
-        if task.waitForMe() == Task.SUCCESS:
-            return (session,True)
-        else:
-            return (session,False)
-    else:
-        return (session,False)
 
-def renameSnapshotVM(session,vmname,old_name=None,new_name=None,desc=None):
+    :param session:
+    :param vmname: The name of the root VM
+    :snapshot_name: The name of the snapshot to revert to
+    :return: session on success or die on error
     """
-    Rename a snapshot
-    vmname: the name of the VM containing the snapshot
-    old_name: the name of the snapshot
-    new_name: the new name, if blank a name will be generated
-    desc: Add a description for the renamed VM (optional)
+    
+    vm = getVMbyName(session,vmname)
+    vmsnap = __getSnapshotInTree(vm, snapshot_name)
+
+    if not vmsnap:
+        croak("Could not revert VM %s back to snapshot %s" % (vmname,snapshot_name)) 
+
+    task = vmsnap.revertToSnapshot_Task(None)
+    if task.waitForMe() == Task.SUCCESS:
+        return session
+    else:
+        croak("Could not revert VM %s back to snapshot %s" % (vmname,snapshot_name)) 
+
+
+def renameSnapshotVM(session,vmname,old_name,new_name=None,desc=None):
+    """
+    Rename a snapshot on the given VM
+
+    :param session:
+    :param vmname: the name of the VM containing the snapshot
+    :param old_name: the name of the existing snapshot
+    :param new_name: the new name, if blank a name will be generated
+    :param desc: Add a description for the renamed VM (optional)
+    :return (session,new_name) on success or die
     """
     vm = getVMbyName(session,vmname)
 
@@ -766,22 +809,26 @@ def renameSnapshotVM(session,vmname,old_name=None,new_name=None,desc=None):
     if not desc:
         desc = new_name
 
-    snapshot_tree = None
-    snapInfo = vm.getSnapshot()
-    if snapInfo and snapInfo.getRootSnapshotList():
-        snapshot_tree = __findSnapshot(snapInfo.getRootsnapshotList(),old_name)
-    
-    if not snapshot_tree:
-        croak("Problem renaming the snapshot.  Snapshot: %s not found." % old_name)
+    #snapshot_tree = None
+    #snapInfo = vm.getSnapshot()
+    #if snapInfo and snapInfo.getRootSnapshotList():
+    #    snapshot_tree = __findSnapshotInTree(snapInfo.getRootsnapshotList(),old_name)
+    #
+    #if not snapshot_tree:
+    #    croak("Problem renaming the snapshot.  Snapshot: %s not found." % old_name)
 
     # Get the VirtualMachineSnapshot object.
-    oh_snap = snapshot_tree.getSnapshot()
-    snapshot = MorUtil.createExactManagedObject(session.getServerConnection(),oh_snap)
-    
+    #oh_snap = snapshot_tree.getSnapshot()
+    #snapshot = MorUtil.createExactManagedObject(session.getServerConnection(),oh_snap)
+
+    snapshot = __getSnapshotInTree(vm,old_name)
+
+    if not snapshot:
+        croak("Cannot rename a snapshot for VM %s no snapshot found with name %s" % (vmname,old_name))
     try:
         snapshot.renameSnapshot(name_name,desc)
     except:
-        croak("Error encountered remaining the snapshot")
+        croak("Error encountered renaming the snapshot")
     
     return (session,new_name)
     
@@ -789,36 +836,37 @@ def renameSnapshotVM(session,vmname,old_name=None,new_name=None,desc=None):
 
 def removeSnapshotVM(session,name,snapshot_name,removeChild=True):
     """
-    Remove a given snapshot
-    vmname: is the original name of the VM
-    snapshot_name: is the name of the snapshot
-    removeChild: Should I remove children on a snapshot?  Default: True
-    returns (session,True) on success and (session,False) on failure
+    Remove a given snapshot by name
+    
+    :param session:
+    :param name: is the name of the VM
+    :param snapshot_name: is the name of the snapshot
+    :param removeChild: Should I remove children on a snapshot?  Default: True
+    :return session on success or die on failure
     """
     vm = getVMbyName(session,name)
     
-    vmsnap = getSnapshotInTree(vm, snapshot_name)
-    if vmsnap:
-        task = vmsnap.removeSnapshot_Task(removeChild);
+    vmsnap = __getSnapshotInTree(vm, snapshot_name)
+    if not vmsnap:
+        croak("Could not remove snapshot %s for VM %s" % (snapshot_name,vmname))
+        
+    task = vmsnap.removeSnapshot_Task(removeChild);
 
-        if task.waitForMe() == Task.SUCCESS:
-            return (session,True)
-        else:
-            return (session,False)
+    if task.waitForMe() == Task.SUCCESS:
+        return session
     else:
-        return (session,False)
-
-
-
+        croak("Could not remove snapshot %s for VM %s" % (snapshot_name,vmname))
 
 
 """ Helper methods below """
 
-
 def answerVM(session,name):
     """
     Tries to answer question posed by the server
-    returns: session
+    
+    :param session:
+    :param name: the name of the VM
+    :return: session or die on error
     """
     powerState = "undef"
     s, powerState = getStateVM(session,name)
@@ -857,6 +905,10 @@ def getVMbyName(session,name):
     """
     Return the VirtualMachine object for a VM by name. If the VM is NOT
     found, log the error and exit the process
+    
+    :param session:
+    :param name: the name of the VM
+    :return: the VM or die
     """
     rootFolder = session.getRootFolder()
     vm = InventoryNavigator(rootFolder).searchManagedEntity("VirtualMachine",name)
@@ -866,20 +918,15 @@ def getVMbyName(session,name):
     else:
         croak("VM name: %s not found" % name)
 
-
-def getAllVMS(session):
-    """ 
-    Returns a list of all VMs in the system
-    """
-    rootFolder = session.getRootFolder()
-    list = InventoryNavigator(rootFolder).searchManagedEntities("VirtualMachine")
-    return (session,list)
-
-
-# TODO: I need 2 different version: one that can return a Snapshot and one
-# that can just check if there's a given name of the snapshot
 def __isSnapshotByName(session,snapshot_name):
-    s,list = getAllVMS(session)
+    """
+    Searches for a snapshot by name in a given VM
+    
+    :param session:
+    :param snapshot_name: the name of the snapshot
+    :return: True if a snapshot is found
+    """
+    list = InventoryNavigator(session.getRootFolder()).searchManagedEntities("VirtualMachine")
     for vm in list:
         snShot = vm.getSnapshot()
         if snShot:
@@ -890,6 +937,9 @@ def __isSnapshotByName(session,snapshot_name):
     return False
                                           
 def __findByNameInSnapshotTree(snapTree,name):
+    """
+    Only used by __isSnapshotByName()
+    """
     for node in snapTree:
         if name == node.getName():
             return True
@@ -901,34 +951,57 @@ def __findByNameInSnapshotTree(snapTree,name):
     return False
 
 
-#def __getSnapshotInTree(vm,snapshot_name):
-#
-#    if vm == None or snapshot_name == None:
-#        print "Error missing VM and or snapshot_name"
-#        return False
-#
-#    snapTree = vm.getSnapshot().getRootSnapshotList()
-#    if snapTree:
-#        return  __findSnapshotInTree(snapTree, snapshot_name)
-#    else:
-#        return None
+def __getSnapshotInTree(vm,snapname):
+    """
+    Find and return a snapshot by name
+    
+    :param vm: the vm to search
+    :param snapname: then name of the snapshot
+    :return: snapshot on success or None
+    """
+    if not vm:
+        croak("Missing VM need to find snapshot")
 
-def __findSnapshot(snapshot_list, snapshot_name):
-    for snapshot_tree in snapshot_list:
-        if snapshot_name == snapshot_tree.getName():
-            return snapshot_tree
+    if not snapname:
+        croak("Missing snapshot name needed to find the snapshot")
+        
+    snap = vm.getSnapshot()
+    if not snap:
+        return None
+
+    snapTree = snap.getRootSnapshotList()
+    if snapTree:
+        mor = __findSnapshotInTree(snapTree,snapname)
+        if mor:
+            return VirtualMachineSnapshot(vm.getServerConnection(), mor)
+    
+    return None
+
+def __findSnapshotInTree(snapshot_list, snapshot_name):
+    """
+    Does a recursive search into the snapshop tree finds the first snapshot
+    
+    :param snapshot_list: the snapshot list
+    :param snapshotname: the name of the snapshot
+    :return: the snapshot if found or None
+    """
+    for node in snapshot_list:
+        if snapshot_name == node.getName():
+            return node.getSnapshot()
         else:
             # check the children
-            childTree = snapshot_tree.getChildSnapshotList()
+            childTree = node.getChildSnapshotList()
             if childTree:
-                __findSnapshot(childTree, snapshot_name)
+                mor = __findSnapshotInTree(childTree, snapshot_name)
+                if mor:
+                    return mor
     return None
 
 
 def __generateVMID():
     """ 
     Generate a random Unique ID for the VM name
-    returns ID as a String
+    :return: a Unique ID as a String
     """
     return uuid.uuid4().hex
 
@@ -937,11 +1010,11 @@ def fullCopyVM(session,src_name,dst_name):
     """
     Make a *complete* copy of the VM and it's associated files.
 
-    session:  the session object
-    src_name: the name of the VM to copy
-    dst_name: the new directory name to copy the VM to
+    :param session:  the session object
+    :param src_name: the name of the VM to copy
+    :param dst_name: the new directory name to copy the VM to
     
-    returns: The fullpath to the copied VMX file
+    :return: The fullpath to the copied VMX or die on error
     """
     # Regular expression used for converting the adapter type
     adapterPattern = re.compile(r"([A-Za-z]{3})(.*)")
@@ -956,14 +1029,10 @@ def fullCopyVM(session,src_name,dst_name):
     vdiskMgr = session.getVirtualDiskManager()
     
     if not fileMgr:
-      print "FileManager not available."
-      return (session,'undef')
+      croak("FileManager not available. Cannot copy the VM")
     
     # Now get the VirtualMachine we're copying
     vm = getVMbyName(session,src_name)
-    #if not vm:
-    #    print "No VirtualMachine found with name %s" % src_name
-    #    return (session,'undef')
 
     # Get the name of the datastore that holds the source VM
     # We assume the source VM is located on only one datastore.
@@ -976,8 +1045,7 @@ def fullCopyVM(session,src_name,dst_name):
     try:
         fileMgr.makeDirectory(basePath,data_center,True)
     except MethodFault, detail:
-        print "Problem making a directory for the copy: %s" % detail
-        return (session,'undef')
+        croak("Problem making a directory for the VM copy: %s" % detail)
         
     # Loop over all devices attached to the src VM
     for dev in vm.getConfig().getHardware().getDevice():
@@ -988,8 +1056,7 @@ def fullCopyVM(session,src_name,dst_name):
             vdsk_fmt = dev.getBacking()
 
             if not isinstance(vdsk_fmt,VirtualDiskFlatVer1BackingInfo) and not isinstance(vdsk_fmt,VirtualDiskFlatVer2BackingInfo):
-                print "Error copying %s to %s. Unsupported disk format." % (src_name, dst_name)
-                return (session,"undef")
+                croak("Error copying %s to %s. Unsupported disk format." % (src_name, dst_name))
 
             # Now get the filename for it
             source_vmdk = vdsk_fmt.getFileName()
@@ -1024,11 +1091,9 @@ def fullCopyVM(session,src_name,dst_name):
             try:
                 task = vdiskMgr.copyVirtualDisk_Task(source_vmdk,data_center,dest_vmdk,data_center,diskSpec,True)
                 if not task.waitForMe() == Task.SUCCESS:
-                    print "Error copying the virtualdisk to destination"
-                    return (session,"undef")
+                    croak("Error copying the virtualdisk to destination")
             except MethodFault, detail:
-                print "Error copying the virtualdisk to destination. Reason: %s" % detail
-                return (session,"undef")
+                croak("Error copying the virtualdisk to destination. Reason: %s" % detail)
                 
     # --- Copy the other files associated with the source VM. ---
     # Get the nvram/vmss files associated with the source VM and construct
@@ -1065,27 +1130,25 @@ def fullCopyVM(session,src_name,dst_name):
         try:
             taskA = fileMgr.copyDatastoreFile_Task(source_nvram,data_center,dest_nvram,data_center,True)
             if not taskA.waitForMe() == Task.SUCCESS:
-                print "Error copying the NVRAM file(s) to destination"
+                LOG.error("Error copying the NVRAM file(s) to destination")
         except MethodFault,detail:
-            print "Skipping the nvram file..."
+            LOG.error("Skipping the nvram file...")
         
     if source_vmss and dest_vmss:
         # Attempt to gracefully handle errors.  If the copy fails, we can still continue
         try:
             taskB = fileMgr.copyDatastoreFile_Task(source_vmss,data_center,dest_vmss,data_center,True)
             if not taskB.waitForMe() == Task.SUCCESS:
-                print "Error copying the VMSS file to destination"
+                LOG.error("Error copying the VMSS file to destination")
         except MethodFault,detail:
-             print "Skipping the vmss file..."
+             LOG.error("Skipping the vmss file...")
 
     try:
         taskC = fileMgr.copyDatastoreFile_Task(source_vmx,data_center,dest_vmx,data_center,True)
         if not taskC.waitForMe() == Task.SUCCESS:
-            print "Error copying the VMX file to destination"
-            return (session,"undef")
+            croak("Error copying the VMX file to destination. Some other files may have already been copied")
     except MethodFault, detail:
-        print "Error copying the VMX file reason: %s" % detail
-        return (session,'undef')
+        croak("Error copying the VMX file to destination. Some other files may have already been copied")
     
     return (session,dest_vmx)
 
@@ -1108,8 +1171,7 @@ def quickCopyVM(session,src_name,dst_name):
     fileMgr = session.getFileManager()
     
     if not fileMgr:
-      print "FileManager not available."
-      return (session,'undef')
+      croak("FileManager not available. Cannot do a quick copy")
     
     # Now get the VirtualMachine we're copying
     vm = getVMbyName(session,src_name)
@@ -1124,8 +1186,7 @@ def quickCopyVM(session,src_name,dst_name):
     try:
         fileMgr.makeDirectory(basePath,data_center,True)
     except MethodFault, detail:
-        print "Problem making a directory for the copy: %s" % detail
-        return (session,'undef')
+        croak("Problem making a directory for the copy: %s" % detail)
 
     source_nvram = None
     dest_nvram = None
@@ -1156,28 +1217,26 @@ def quickCopyVM(session,src_name,dst_name):
         try:
             taskA = fileMgr.copyDatastoreFile_Task(source_nvram,data_center,dest_nvram,data_center,True)
             if not taskA.waitForMe() == Task.SUCCESS:
-                print "Error copying the NVRAM file(s) to destination"
+                croak("Error copying the NVRAM file(s) to destination")
         except MethodFault,detail:
             # Catch the exception and ignore it
-            print 'Skipping the nvram file...'
+            croak('Skipping the nvram file...')
 
     if source_vmss and dest_vmss:
         # Attempt to gracefully handle errors.  If the copy fails, we can still continue
         try:
             taskB = fileMgr.copyDatastoreFile_Task(source_vmss,data_center,dest_vmss,data_center,True)
             if not taskB.waitForMe() == Task.SUCCESS:
-                print "Error copying the VMSS file to destination"
+                croak("Error copying the VMSS file to destination")
         except MethodFault,detail:
-             print "Skipping the vmss file..."
+             croak("Skipping the vmss file...")
 
     try:
         taskC = fileMgr.copyDatastoreFile_Task(source_vmx,data_center,dest_vmx,data_center,True)
         if not taskC.waitForMe() == Task.SUCCESS:
-            print "Error copying the VMX file to destination"
-            return (session,"undef")
+            croak("Error copying the VMX file to destination")
     except MethodFault, detail:
-        print 'Error copying the VMX file!'
-        return (session,'undef')
+        croak('Error copying the VMX file!')
     
     return (session,dest_vmx)
 
@@ -1185,13 +1244,21 @@ def quickCopyVM(session,src_name,dst_name):
 def croak(msg):
     """
     Helper method for logging an Error and exiting
+
+    :param msg: the message to log
     """
     LOG.error(msg)
     sys.exit(msg)
 
 
 def __delete_filesVM(session,name):
-
+    """
+    Unregister and delete all files associated with a given VM
+    
+    :param session:
+    :param name: the name of the VM
+    :return: True on succes or die
+    """
     # Must get this info BEFORE unregistering the VM
     vm = getVMbyName(session,name)
     datastore_list = vm.getDatastores()
@@ -1235,10 +1302,13 @@ def __delete_filesVM(session,name):
 
 def __poll_task_for_question(t,session,vmname):
     """
-    Checks for questions from ESX. This is a wrapper for the task
-    param: t the task
-    param: session the session
-    params: vmname: The VM name
+    Checks for questions from ESX. This is a wrapper for the task object. It polls 
+    the task and periodically checks for questions.
+
+    :param t: the task
+    :param session: the session
+    :params vmname: The VM name
+    :return: the state of the task or die
     """
     tState = None
     tries = 0 
