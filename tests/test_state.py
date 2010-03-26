@@ -5,7 +5,7 @@ from honeyclient.util.config import *
 class StateTest(unittest.TestCase):
     """
     This is a large test and may take several minutes to complete.
-    It exercises the full api
+    It exercises the full api (PASSED)
     """
     def setUp(self):
         self.url = getArg('service_url','honeyclient::manager::esx::test')
@@ -75,8 +75,24 @@ class StateTest(unittest.TestCase):
         s,shouldbefalse = isRegisteredVM(self.session,"blabblabblacb")
         self.assertFalse(shouldbefalse)
 
+    def test_register_unregister(self):
+        s,shouldbetrue = isRegisteredVM(self.session,self.testvm)
+        self.assertTrue(shouldbetrue)
 
+        # Unregister the VM
+        s,fn = unRegisterVM(self.session,self.testvm)
+        self.assertNotEqual(fn,'undef')
+        
+        # Check it's unregistered
+        s,shouldbefalse = isRegisteredVM(self.session,self.testvm)
+        self.assertFalse(shouldbefalse)
 
+        # Register the VM
+        registerVM(self.session,fn,self.testvm)
+
+        # Check it
+        s,finalTrue = isRegisteredVM(self.session,self.testvm)
+        self.assertTrue(finalTrue)
 
     
 if __name__ == '__main__':

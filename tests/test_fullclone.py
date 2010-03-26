@@ -3,6 +3,10 @@ from honeyclient.manager.esx import *
 from honeyclient.util.config import *
 
 class FullCloneTest(unittest.TestCase):
+    """
+    Test making a full clone: Passed
+    """
+    
     def setUp(self):
         self.url = getArg('service_url','honeyclient::manager::esx::test')
         self.un = getArg('user_name','honeyclient::manager::esx::test')

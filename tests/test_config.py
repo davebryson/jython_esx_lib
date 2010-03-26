@@ -3,7 +3,7 @@ from honeyclient.util.config import *
 
 class TestConfig(unittest.TestCase):
     """
-    Unit tests for config.py
+    Unit tests for config.py (PASSED)
     """
     def testLoadDocument(self):
         """
