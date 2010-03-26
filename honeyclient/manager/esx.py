@@ -10,10 +10,10 @@ author Dave Bryson
 
 Example use from a Jython shell: 
 
- >> import esx
- >> session = esx.login('https://yourserver/sdk','username','password')
- >> session,results = esx.listAllRegisteredVMS(session)
- >> for i in results: print i 
+>> import esx
+>> session = esx.login('https://yourserver/sdk','username','password')
+>> session,results = esx.listAllRegisteredVMS(session)
+>> for i in results: print i 
 """
 
 from java.net import URL
@@ -126,7 +126,7 @@ def unRegisterVM(session,name):
     :param session:
     :param name: the registered name of the VM
     :return: (session,filename of the VM) on success 
-             or (session,'undef') if the VM wasn't found
+    or (session,'undef') if the VM wasn't found
     """
     vm = getVMbyName(session,name)
 
@@ -274,21 +274,18 @@ def fullCloneVM(session,srcname,dstname=None):
     Create a full copy of the src VM to the destination folder, To include associated files (vmdk,nvram, etc...)
     :param srcname: is the name of the existing VM to clone
     :param dstname: is the name of the new directory to copy the VM to.
-    :return (session,dstname) or (session,'undef') if the copy fails
+    :return (session,dstname) or die on error
 
     Steps:
-    1. Generate a VMID if dstname wasn't given
-    2. Check if the VM is registered. Then search the snapshot tree
-    3. Check if vm is suspended or off If NOT suspend it
-    4. Make a full copy of it
-    5. register the copy
-    6. If it was suspended reset it
-
-    (TESTED)
+     1. Generate a VMID if dstname wasn't given
+     2. Check if the VM is registered. Then search the snapshot tree
+     3. Check if vm is suspended or off If NOT suspend it
+     4. Make a full copy of it
+     5. register the copy
+     6. If it was suspended reset it
     """
     if not srcname:
-        LOG.error("Error cloning the VM: srcname wasn't specified")
-        return (session,'undef')
+        croak("Error cloning the VM: srcname wasn't specified")
 
     if not dstname:
         # Create a UUID for the name and check that if doesn't exist 
@@ -306,11 +303,9 @@ def fullCloneVM(session,srcname,dstname=None):
     else:
         s,valVM = isRegisteredVM(session,dstname)
         if valVM:
-            LOG.error("The dest_name %s matches a registered VM. Please use another name" % dstname)
-            return (session,'undef')
+            croak("The dest_name %s matches a registered VM. Please use another name" % dstname)
         if __isSnapshotByName(session,dstname):
-            LOG.error("The dest_name %s matches and existing VM Snapshot name. Please use another name" % dstname)
-            return (session,'undef')
+            croak("The dest_name %s matches and existing VM Snapshot name. Please use another name" % dstname)
 
     s,src_state = getStateVM(session,srcname)
     
@@ -671,7 +666,7 @@ def destroyVM(session,vmname):
 
     return session
 
-def snapshotVM(session,name,snapshot_name,desc,ignore_collisions=False):
+def snapshotVM(session,name,snapshot_name=None,desc=None,ignore_collisions=False):
     """
     Create a snapshot of an existing VM
 
@@ -691,21 +686,21 @@ def snapshotVM(session,name,snapshot_name,desc,ignore_collisions=False):
     if not snapshot_name:
         # Create a UUID for the name and check that if doesn't exist 
         while(True):
-            dstname = __generateVMID()
+            snapshot_name = __generateVMID()
             # First check to see it's NOT a registered VM name
             # if it does match an existing name, keep trying with another name
-            s,r = isRegisteredVM(session,dstname)
+            s,r = isRegisteredVM(session,snapshot_name)
             if not r:
                 # Next, check there are NO snapshots with the same name
-                if not __isSnapshotByName(session,dstname):
+                if not __isSnapshotByName(session,snapshot_name):
                     # If we didn't find the name in all the snapshots, we're done
                     break
     elif not ignore_collisions:
-        s,r1 = isRegisteredVM(session,dstname)
+        s,r1 = isRegisteredVM(session,snapshot_name)
         if r1:
-            croak("The dest_name %s matches and existing VM. Please use another name" % dstname)
-        if __isSnapshotByName(session,dstname):
-            croak("The dest_name %s matches and existing VM Snapshot name. Please use another name" % dstname)
+            croak("The dest_name %s matches an existing VM. Please use another name" % snapshot_name)
+        if __isSnapshotByName(session,snapshot_name):
+            croak("The dest_name %s matches an existing VM Snapshot name. Please use another name" % snapshot_name)
     try:
         task = vm.createSnapshot_Task(snapshot_name,desc,True,True)
         if task.waitForMe() == Task.SUCCESS:
@@ -757,7 +752,13 @@ def revertVM(session,vmname,snapshot_name):
     :snapshot_name: The name of the snapshot to revert to
     :return: session on success or die on error
     """
-    
+
+    if not vmname:
+        croak("Missing VM name")
+
+    if not snapshot_name:
+        croak("Missing Snapshot name to revert to")
+
     vm = getVMbyName(session,vmname)
     vmsnap = __getSnapshotInTree(vm, snapshot_name)
 
