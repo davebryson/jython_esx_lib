@@ -1,8 +1,0 @@
-
-Next:
-
-- on QuickClone VM is failing because the VM is left in the suspended state and can't resume it... (because of testing???)
-
-- replace with croaks.
-
-- tests (do from command line if needed...)
