@@ -827,7 +827,7 @@ def renameSnapshotVM(session,vmname,old_name,new_name=None,desc=None):
     if not snapshot:
         croak("Cannot rename a snapshot for VM %s no snapshot found with name %s" % (vmname,old_name))
     try:
-        snapshot.renameSnapshot(name_name,desc)
+        snapshot.renameSnapshot(new_name,desc)
     except:
         croak("Error encountered renaming the snapshot")
     
