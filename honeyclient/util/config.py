@@ -6,7 +6,7 @@ import org.dom4j.XPath
 
 import logging,inspect,re
 
-CONF_FILE = "etc/honeyclient_test.xml"
+CONF_FILE = "etc/honeyclient.xml"
 
 # Global XPath and Logger
 XP = None
