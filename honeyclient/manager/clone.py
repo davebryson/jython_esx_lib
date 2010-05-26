@@ -5,6 +5,7 @@ from honeyclient.util.config import *
  
 import sys
 from datetime import datetime, timedelta
+from time import sleep
 
 class Clone(object):
     
@@ -148,7 +149,7 @@ class Clone(object):
         if not self.guest_password:
             self.__croak("Guest Passeword was not provided")
             
-        # Add code for loading 'complete_image' here
+        # TODO: Add code for loading 'complete_image' here
 
         if not self.vm_session:
             
@@ -170,10 +171,24 @@ class Clone(object):
             self.vix_connect_host()
 
         if self.bypass_firewall:
-            LOG.INFO("TODO: Setup Firewall...")
-
-        # PICKUP HERE...
-
+            LOG.info("TODO: Setup Firewall...")
+        
+        if self.num_snapshots >= getArg('max_num_snapshots','HoneyClient::Manager::ESX'):
+            LOG.info("Suspending Clone VM. Reached the maximum number of snapshots")
+            
+            s,r = esx.suspendVM(self.vm_session,self.quick_clone_vm_name)
+            
+            self.quick_clone_vm_name = None
+            self.name = None
+            self.mac_address = None
+            self.ip_address = None
+            self.num_snapshots = 0
+        
+        if self.dont_init:
+            return self
+        else:
+           self.do_init() 
+           # TODO pickup here on error logic
 
     def __check_space_available(self):
         """
@@ -197,7 +212,52 @@ class Clone(object):
         """
         replaces the 'init' call in the Perl code
         """
-        pass
+        if not self.quick_clone_vm_name or not self.name or not self.mac_address or not self.ip_address:
+            LOG.info("Quick cloning master VM: %s" % self.master_vm_name)
+            s, dest_name = esx.quickCloneVM(self.vm_session,self.master_vm_name)
+            
+            self.quick_clone_vm_name = dest_name
+            self.num_snapshots += 1
+            self.__change_status("initialized")
+
+            registered = False
+            while registered:
+                s, registered = esx.isRegisteredVM(self.vm_session,self.quick_clone_vm_name)
+                if not registered:
+                    # poll for it
+                    sleep( self.retry_period )
+            
+            LOG.info("Retrieving config of clone VM")
+            s, self.vm_config = esx.getConfigVM(self.vm_session,self.quick_clone_vm_name)
+            self.__change_status("registered")
+
+            started = "no"
+            while started != 'poweredon':
+                s, started = esx.getStateVM(self.vm_session,self.quick_clone_vm)
+                if started != 'poweredon':
+                    sleep(self.retry_period)
+            self.__change_status('running')
+
+            LOG.info("No waiting on valid MAC/IP for clone")
+            temp_ip = None
+            while not self.ip_address or not self.mac_address:
+                s, self.mac_address = esx.getMACaddrVM(self.vm_session,self.quick_clone_vm)
+                s, temp_ip = esx.getIPaddrVM(self.vm_session,self.quick_clone_vm)
+                
+                if temp_ip and temp_ip != self.ip_address:
+                    LOG.info("Cloned VM has a new IP")
+                    
+                    # TODO: call self._deny_network()
+                    
+                    self.ip_address = temp_ip
+
+                if not self.ip_address or not self.mac_address:
+                    # TODO: Pickup here
+                    pass
+                
+            
+            
+            
 
     # Temp REMOVE THIS LATER
     def shutdown(self):
@@ -374,6 +434,24 @@ class Clone(object):
     
     def suspend(self):
         pass
+
+    def __change_status(self,value=None):
+        if not value:
+            self.__croak("Error. No status argument supplied")
+        
+        if self.status == "suspicious" or \
+                self.status == "compromised" or \
+                self.status = "error" or \
+                self.status == "bug" or self.status == "deleted":
+                
+                return
+
+
+        self.status = value
+        
+        if self.quick_clone_vm_name and self.name:
+            LOG.info("TODO: contact the message client and event emitter")
+            
     
     # Should this be __del__
     def destroy(self):
