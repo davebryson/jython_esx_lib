@@ -1,11 +1,16 @@
 
-from com.vmware.vix import *
+
+#from com.vmware.vix import *
+
 from honeyclient.manager import esx
 from honeyclient.util.config import *
  
 import sys
 from datetime import datetime, timedelta
 from time import sleep
+
+
+# DISABLED VIX CALLS FOR NOW FOR TESTING BASIC CLONE CREATION
 
 class Clone(object):
     
@@ -24,11 +29,13 @@ class Clone(object):
         
         # A VIX host handle, used when accessing the VMware ESX server remotely.
         # (This internal variable should never be modified externally.)
-        self.host_handle = VixHandle.VIX_INVALID_HANDLE
+        
+        #self.host_handle = VixHandle.VIX_INVALID_HANDLE
         
         # A VIX VM handle, used when accessing the VM on the VMware ESX server
         # remotely.  (This internal variable should never be modified externally.)
-        self.vm_handle = VixHandle.VIX_INVALID_HANDLE
+        
+        #self.vm_handle = VixHandle.VIX_INVALID_HANDLE
         
         # A variable, indicating when the last time the VIX host handle was updated.
         # (This internal variable should never be modified externally.)
@@ -139,9 +146,11 @@ class Clone(object):
         # (This internal variable should never be modified externally.)
         self.vix_call_timeout = getArg("vix_timeout","HoneyClient::Manager::ESX::Clone")
 
+        # Default for dont_init flag used for testing
+        self.dont_init = False
+
         # Update the internal dictionary with args passed in
         self.__dict__.update(kwargs)
-
         
         if not self.guest_username:
             self.__croak("Guest Username was not provided")
@@ -149,7 +158,12 @@ class Clone(object):
         if not self.guest_password:
             self.__croak("Guest Passeword was not provided")
             
-        # TODO: Add code for loading 'complete_image' here
+        self.__setup()
+    
+
+    def __setup(self):
+        
+        LOG.info("TODO: Add code for loading 'complete_image' here")
 
         if not self.vm_session:
             
@@ -161,14 +175,16 @@ class Clone(object):
             s, ip = esx.getIPaddrESX(self.vm_session)
             
             LOG.info("Setup EventEmitter host with %s %s" % (hostname,ip))
-            
+
+        
+        # Check if there's enough disk space. If not, die
         self.__check_space_available()
         
         # Connect (or reconnect) to host via VIX, if enabled.
-        if int(getArg('vix_enable','HoneyClient::Manager::ESX::Clone')):
-            self.vix_disconnect_vm()
-            self.vix_disconnect_host()
-            self.vix_connect_host()
+        #if int(getArg('vix_enable','HoneyClient::Manager::ESX::Clone')):
+        #    self.vix_disconnect_vm()
+        #    self.vix_disconnect_host()
+        #    self.vix_connect_host()
 
         if self.bypass_firewall:
             LOG.info("TODO: Setup Firewall...")
@@ -184,31 +200,34 @@ class Clone(object):
             self.ip_address = None
             self.num_snapshots = 0
         
+        # dont_init is ONLY used for testing without fully init() the object
         if self.dont_init:
-            return self
+            # we're done here
+            return
         else:
-           self.do_init() 
-           # TODO pickup here on error logic
+            try:
+                self.__do_init()
+            except SystemExit:
+                # Suspend the VM and try again
+                LOG.error("Unable to init VM %s - Retrying..." % self.quick_clone_vm_name)
+                LOG.info("Suspending the VM")
 
-    def __check_space_available(self):
-        """
-        Check to make sure there's enough free space in the ESX datastore
-        IF NOT exit()
-        """
-        s, free_space = esx.getDatastoreSpaceAvailable(self.vm_session,self.master_vm_name)
-        min_space_free = getArg('min_space_free','HoneyClient::Manager::ESX')
-        
-        if min_space_free == 'undef':
-            self.__croak('Cannot determine the min_space_available in honeyclient.xml')
-        
-        min_space_free = int(min_space_free) * (1024 * 1024 * 1024)
+                suspended_at = datetime.now()
+                
+                try:
+                    s,r = esx.suspendVM(self.vm_session,self.quick_clone_vm_name)
+                    self.__change_status("suspended",suspended_at)
+                except SystemExit:
+                    LOG.error("Unable to suspend the VM")
 
-        if free_space < min_space_free:
-            store_free_space = free_space / (1024 * 1024 * 1024)
-            self.__croak("Primary datastore has low disk space: %0.2f GBs" % store_free_space)
+            # Commented out for testing for now...
 
+            #if int(getArg('vix_enable','HoneyClient::Manager::ESX::Clone')):
+            #    self.vix_connect_vm()
+            #    self.vix_login_as_guest()
+                    
 
-    def do_init(self):
+    def __do_init(self):
         """
         replaces the 'init' call in the Perl code
         """
@@ -232,9 +251,9 @@ class Clone(object):
             self.__change_status("registered")
 
             started = "no"
-            while started != 'poweredon':
+            while started != 'poweredOn':
                 s, started = esx.getStateVM(self.vm_session,self.quick_clone_vm)
-                if started != 'poweredon':
+                if started != 'poweredOn':
                     sleep(self.retry_period)
             self.__change_status('running')
 
@@ -252,11 +271,95 @@ class Clone(object):
                     self.ip_address = temp_ip
 
                 if not self.ip_address or not self.mac_address:
-                    # TODO: Pickup here
-                    pass
+                    snapname = getArg("default_quick_clone_snapshot_name","HoneyClient::Manager::ESX")
+                    self.__check_for_bsod(snapname)
+                    sleep(self.retry_period)
+                    continue
                 
+                LOG.info("TODO: allow_network")
+                LOG.info("get Agent Handle")
+                LOG.info("get Agent properties")
+
+                # NEED TO CHECK HERE FOR THE AGENT AND WAIT FOR IT
+                # THIS WILL BE 'if' block
+                
+                LOG.info("Create operational snapshot of the VM")
+                desc = getArg("operational_quick_clone_snapshot_description","HoneyClient::Manager::ESX")
+                s, snapname = esx.snapshotVM(self.vm_session,self.quick_clone_vm_name,desc)
+                self.name = snapname
+                self.num_snapshots += 1
+
+                s, hostname = esx.getHostnameESX(self.vm_session)
+                s, ip = esx.getIPaddrESX(self.vm_session)
+                
+                LOG.info("TODO: notify the drone here with a message")
+        else:
             
+            if not self.name:
+                self.__croak("Unable to start clone. No operational snapshot provided")
+
+            LOG.info("Reverting clone VM to operational snapshot")
             
+            s = esx.revertVM(self.vm_session,self.quick_clone_vm_name,self.name)
+            # Rename the snapshot
+            desc = getArg("operational_quick_clone_snapshot_description","HoneyClient::Manager::ESX")
+            s, newname = esx.renameSnapshotVM(self.vm_session,self.quick_clone_vm_name,self.name,desc)
+            self.name = newname
+            LOG.info("Renamed operational snapshot from %s to %s",(self.quick_clone_vm_name,self.name))
+            LOG.info("Get the VM config file")
+
+            s, self.vm_config = esx.getConfigVM(self.vm_session,self.quick_clone_vm_name)
+            LOG.info("Starting clone VM")
+            esx.startVM(self.vm_session,self.quick_clone_vm_name)
+            
+            # Wait to make sure it's running
+            running = False
+            while not running:
+                s, st = esx.getStateVM(self.vm_session,self.quick_clone_vm_name)
+                if st == 'poweredOn':
+                    running = True
+                else:
+                    sleep(self.retry_period)
+                    
+            self.__change_status("running")
+
+            LOG.info("TODO: start agent & notify drone")
+
+
+    def __check_for_bsod(self,snapname):
+        
+        max_retry_count = int(getArg("max_retry_count","HoneyClient::Manager::ESX"))
+        if self.num_failed_inits > max_retry_count:
+
+            LOG.info("TODO: denynetwork")
+            LOG.error("Detected possible BSOD in initializing clone VM %s" % self.quick_clone_vm_name)
+
+            LOG.info("Reverting Clone VM")
+            esx.revertVM(self.vm_session,self.quick_clone_vm_name,snapname)
+            esx.startVM(self.vm_session,self.quick_clone_vm_name)
+            self.num_failed_inits = 0
+        else:
+            self.num_failed_inits += 1
+            LOG.info("Clone VM %s - had %i failed inits" % (self.quick_clone_vm_name,self.num_failed_inits))
+            
+
+    def __check_space_available(self):
+        """
+        Check to make sure there's enough free space in the ESX datastore
+        IF NOT exit()
+        """
+        s, free_space = esx.getDatastoreSpaceAvailable(self.vm_session,self.master_vm_name)
+        min_space_free = getArg('min_space_free','HoneyClient::Manager::ESX')
+        
+        if min_space_free == 'undef':
+            self.__croak('Cannot determine the min_space_available in honeyclient.xml')
+        
+        min_space_free = int(min_space_free) * (1024 * 1024 * 1024)
+
+        if free_space < min_space_free:
+            store_free_space = free_space / (1024 * 1024 * 1024)
+            self.__croak("Primary datastore has low disk space: %0.2f GBs" % store_free_space)
+
             
 
     # Temp REMOVE THIS LATER
@@ -265,7 +368,7 @@ class Clone(object):
         self.vix_disconnect_vm()
         self.vix_disconnect_host()
         
-    # Replace with croak in 'config'
+    # Replace with croak in 'config'?
     def __croak(self,msg):
         """
         Helper to log errors and die
@@ -273,6 +376,7 @@ class Clone(object):
         """
         LOG.error(msg)
         sys.exit(msg)
+
 
     # VIX Calls...
     def vix_connect_host(self):
@@ -435,7 +539,7 @@ class Clone(object):
     def suspend(self):
         pass
 
-    def __change_status(self,value=None):
+    def __change_status(self,value=None,suspended_at=None):
         if not value:
             self.__croak("Error. No status argument supplied")
         
@@ -453,8 +557,14 @@ class Clone(object):
             LOG.info("TODO: contact the message client and event emitter")
             
     
-    # Should this be __del__
     def destroy(self):
-        pass
-        
+        LOG.info("TODO: denyNetwork")
+        try:
+            desc = getArg("operational_quick_clone_snapshot_description","HoneyClient::Manager::ESX")
+            s, n = esx.renameSnapshotVM(self.vm_session,self.quick_clone_vm_name,self.name,"Deleted Snapshot",desc)
+            self.__change_status("deleted")
+            self.name = n
+        except SystemExit:
+            esx.suspendVM(self.vm_session,self.quick_clone_vm_name)
+            self.__change_status("error")
     
